@@ -188,6 +188,11 @@ function getInitialInspectorCollapsed() {
   return window.localStorage.getItem('haflow-inspector-collapsed') === 'true'
 }
 
+function createId() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID()
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+}
+
 function getCatalogColor(kind) {
   return nodeCatalog.find((item) => item.type === kind)?.color ?? '#64748b'
 }
@@ -637,7 +642,7 @@ function isDeviceCatalogItem(entity) {
 
 function buildDeviceTriggerData(data, device, buttonNumberOverride) {
   const rules = getStateTriggerRules(data)
-  const baseRule = rules[0] ?? { id: crypto.randomUUID(), from: '', to: '' }
+  const baseRule = rules[0] ?? { id: createId(), from: '', to: '' }
   const keepLabel = /^button\s+\d+\b/i.test(String(data.label || ''))
   const picoRow = LUTRON_5_BUTTON_PICO_ROWS.find((row) => row.number === buttonNumberOverride)
   const buttonNumber = picoRow?.number ?? buttonNumberOverride ?? getButtonNumberFromLabel(data.label)
@@ -989,7 +994,7 @@ function FlowWorkspace() {
     if (!raw) return
     const item = JSON.parse(raw)
     const position = screenToFlowPosition({ x: event.clientX, y: event.clientY })
-    const id = `${item.type}-${crypto.randomUUID().slice(0, 8)}`
+    const id = `${item.type}-${createId().slice(0, 8)}`
     setNodes((current) => current.concat({
       id,
       type: 'haflow',
@@ -1090,7 +1095,7 @@ function FlowWorkspace() {
         rules = blankIndex >= 0
           ? currentRules.map((rule, index) => (index === blankIndex ? { ...rule, entityId: entity.entity_id } : rule))
           : currentRules.concat({
-            id: crypto.randomUUID(),
+            id: createId(),
             entityId: entity.entity_id,
             from: '',
             to: '',
@@ -1110,7 +1115,7 @@ function FlowWorkspace() {
       const rules = currentRules.some((rule) => rule.entityId === entity.entity_id)
         ? currentRules.filter((rule) => rule.entityId !== entity.entity_id)
         : currentRules.concat({
-          id: crypto.randomUUID(),
+          id: createId(),
           entityId: entity.entity_id,
           attribute: 'state',
           operator: 'equals',
@@ -1141,7 +1146,7 @@ function FlowWorkspace() {
     const selectedNodes = nodes.filter((node) => selectedNodeIdSet.has(node.id) && node.data?.kind !== 'group')
     if (!selectedNodes.length) return
     const bounds = getNodesBoundsForGroup(selectedNodes)
-    const id = `group-${crypto.randomUUID().slice(0, 8)}`
+    const id = `group-${createId().slice(0, 8)}`
     const groupNode = createGroupNode({ bounds, id, label: selectedNodes.length === 1 ? 'Subflow' : `${selectedNodes.length} Node Subflow` })
     setNodes((current) => {
       const currentById = new Map(current.map((node) => [node.id, node]))
@@ -1176,7 +1181,7 @@ function FlowWorkspace() {
     const copiedNodes = nodes
       .filter((node) => selectionSet.has(node.id))
       .map((node) => {
-        const id = `${node.data.kind || 'node'}-${crypto.randomUUID().slice(0, 8)}`
+        const id = `${node.data.kind || 'node'}-${createId().slice(0, 8)}`
         idMap.set(node.id, id)
         const parentIsCopied = node.parentId && selectionSet.has(node.parentId)
         const absolute = getAbsoluteNodePosition(node, nodeById)
@@ -1201,7 +1206,7 @@ function FlowWorkspace() {
       .filter((edge) => selectionSet.has(edge.source) && selectionSet.has(edge.target))
       .map((edge) => ({
         ...edge,
-        id: `${edge.id}-${crypto.randomUUID().slice(0, 8)}`,
+        id: `${edge.id}-${createId().slice(0, 8)}`,
         source: idMap.get(edge.source),
         target: idMap.get(edge.target),
         selected: false,
@@ -2019,7 +2024,7 @@ function getDefaultService(serviceNames, fallback = '') {
 }
 
 function StateTriggerRulesEditor({ data, entities, updateNodeData }) {
-  const emptyRuleId = useRef(crypto.randomUUID())
+  const emptyRuleId = useRef(createId())
   const editableRules = useMemo(() => {
     const rules = getStateTriggerRules(data)
     return rules.length ? rules : [{ id: emptyRuleId.current, entityId: '', from: '', to: '' }]
@@ -2072,7 +2077,7 @@ function StateTriggerRulesEditor({ data, entities, updateNodeData }) {
 
   const addRule = () => {
     commitRules(editableRules.concat({
-      id: crypto.randomUUID(),
+      id: createId(),
       entityId: '',
       from: '',
       to: '',
@@ -2127,7 +2132,7 @@ function StateTriggerRulesEditor({ data, entities, updateNodeData }) {
 }
 
 function ConditionRulesEditor({ data, entities, updateNodeData }) {
-  const emptyRuleId = useRef(crypto.randomUUID())
+  const emptyRuleId = useRef(createId())
   const editableRules = useMemo(() => {
     const rules = getConditionRules(data)
     return rules.length ? rules : [{ id: emptyRuleId.current, entityId: '', attribute: 'state', operator: 'equals', value: '' }]
@@ -2186,7 +2191,7 @@ function ConditionRulesEditor({ data, entities, updateNodeData }) {
 
   const addRule = () => {
     commitRules(editableRules.concat({
-      id: crypto.randomUUID(),
+      id: createId(),
       entityId: '',
       attribute: 'state',
       operator: 'equals',
