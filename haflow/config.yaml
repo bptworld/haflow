@@ -1,5 +1,5 @@
 name: "HAFlow"
-version: "0.1.18"
+version: "0.1.19"
 slug: "haflow"
 description: "A flow editor and runner for Home Assistant automations."
 url: "https://github.com/bptworld/haflow"
@@ -14,7 +14,7 @@ boot: auto
 init: false
 ingress: true
 ingress_port: 4177
-panel_icon: "mdi:vector-polyline"
+panel_icon: "mdi:cable-data"
 homeassistant_api: true
 options: {}
 schema: {}

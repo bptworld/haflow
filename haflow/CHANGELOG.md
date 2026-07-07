@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.19
+
+- Use a cable-style Home Assistant sidebar icon to match the HAFlow header icon.
+
 ## 0.1.18
 
 - Make Run History collapsible.
