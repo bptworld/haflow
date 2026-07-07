@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.31
+
+- Suppress placeholder action validation warnings inside button-controller groups.
+
 ## 0.1.30
 
 - Limit paused flow highlighting to only the `[Paused]` marker in the flow picker.

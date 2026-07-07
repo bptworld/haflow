@@ -325,7 +325,7 @@ const ANY_CHANGE = '__changed__'
 function NodeBody({ data, selected }) {
   const catalogItem = nodeCatalog.find((item) => item.type === data.kind) ?? nodeCatalog[0]
   const Icon = catalogItem.icon
-  const validation = validateNodeData(data)
+  const validation = data.suppressValidation ? '' : validateNodeData(data)
   const runtimeStatus = data.runtimeStatus
   const disabled = data.disabled
   const summaryLines = summarizeNode(data)
@@ -647,6 +647,7 @@ function formatDuration(milliseconds) {
 }
 
 function validateNodeData(data, entityById = new Map(), services = {}) {
+  if (data.suppressValidation) return ''
   if (data.disabled) return ''
   const hasEntityCatalog = entityById.size > 0
   const entityExists = (entityId) => !entityId || !hasEntityCatalog || entityById.has(entityId)
@@ -685,6 +686,7 @@ function validateNodeData(data, entityById = new Map(), services = {}) {
 
 function validateFlow(nodes, edges, entityById = new Map(), services = {}, isPaused = false) {
   const issues = []
+  const nodesById = new Map(nodes.map((node) => [node.id, node]))
   const outgoing = new Map(nodes.map((node) => [node.id, 0]))
   const incoming = new Map(nodes.map((node) => [node.id, 0]))
   edges.forEach((edge) => outgoing.set(edge.source, (outgoing.get(edge.source) ?? 0) + 1))
@@ -697,9 +699,10 @@ function validateFlow(nodes, edges, entityById = new Map(), services = {}, isPau
 
   for (const node of nodes) {
     if (node.data?.disabled) continue
+    const suppressValidation = shouldSuppressNodeValidation(node, nodesById)
     const nodeIssue = validateNodeData(node.data ?? {}, entityById, services)
-    if (nodeIssue) issues.push(`${node.data?.label || node.id}: ${nodeIssue}`)
-    if (node.data?.kind === 'service') {
+    if (nodeIssue && !suppressValidation) issues.push(`${node.data?.label || node.id}: ${nodeIssue}`)
+    if (node.data?.kind === 'service' && !suppressValidation) {
       const entityIds = node.data.entityIds?.length ? node.data.entityIds : (node.data.entityId ? [node.data.entityId] : [])
       if (!entityIds.length && !TARGETLESS_SERVICE_DOMAINS.has(node.data.domain) && !String(node.data.payload || '').includes('entity_id')) issues.push(`${node.data?.label || node.id}: No target entity`)
     }
@@ -712,6 +715,14 @@ function validateFlow(nodes, edges, entityById = new Map(), services = {}, isPau
   }
 
   return issues
+}
+
+function shouldSuppressNodeValidation(node, nodesById) {
+  if (node.data?.kind !== 'service') return false
+  const parent = node.parentId ? nodesById.get(node.parentId) : null
+  if (!parent || parent.data?.kind !== 'group') return false
+  const label = `${parent.data?.label || ''} ${parent.data?.groupDeviceName || ''}`.toLowerCase()
+  return label.includes('button') || label.includes('pico') || label.includes('controller')
 }
 
 function expandNodeSelection(nodes, selectedIds) {
@@ -1065,14 +1076,16 @@ function FlowWorkspace() {
     if (!runtime?.lastExecutedAt) return false
     return lastRunSnapshotId === '__legacy_last_run__' ? true : runtime.runId === lastRunSnapshotId
   }, [lastRunSnapshotId, nodeRuntime, showLastRunSnapshot])
+  const nodeById = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes])
   const displayNodes = useMemo(() => nodes.map((node) => ({
     ...node,
     selected: selectedNodeIdSet.has(node.id),
     data: {
       ...enrichNodeDisplayData(node.data, entityById, nodeRuntime[node.id], runtimeClock, isInLastRunSnapshot(node.id)),
       groupDeviceName: node.data?.kind === 'group' ? getGroupDeviceName(node, nodes, entityById) : undefined,
+      suppressValidation: shouldSuppressNodeValidation(node, nodeById),
     },
-  })), [entityById, isInLastRunSnapshot, nodeRuntime, nodes, runtimeClock, selectedNodeIdSet])
+  })), [entityById, isInLastRunSnapshot, nodeById, nodeRuntime, nodes, runtimeClock, selectedNodeIdSet])
   const displayEdges = useMemo(() => edges.map((edge) => {
     const sourceStatus = getVisibleRuntimeStatus(nodeRuntime[edge.source], runtimeClock, isInLastRunSnapshot(edge.source))
     const targetStatus = getVisibleRuntimeStatus(nodeRuntime[edge.target], runtimeClock, isInLastRunSnapshot(edge.target))
