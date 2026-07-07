@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.7
+
+- Show the selected Pico device name in bold under grouped 5-button controller titles.
+
 ## 0.1.6
 
 - Resize flow action buttons so Pause and Resume labels fit cleanly.

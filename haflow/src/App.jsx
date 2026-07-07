@@ -279,6 +279,7 @@ function NodeBody({ data, selected }) {
           <Icon size={15} />
           <span>{data.label || catalogItem.label}</span>
         </div>
+        {data.groupDeviceName ? <div className="group-node-device"><strong>{data.groupDeviceName}</strong></div> : null}
       </div>
     )
   }
@@ -592,6 +593,25 @@ function enrichNodeDisplayData(data, entityById, runtimeState, now, forceSnapsho
   }
 }
 
+function getGroupDeviceName(groupNode, nodes, entityById) {
+  const childDeviceNames = nodes
+    .filter((node) => node.parentId === groupNode.id && node.data?.kind === 'state')
+    .flatMap((node) => getStateTriggerRules(node.data).map((rule) => ({
+      deviceId: rule.deviceId || node.data.deviceId,
+      deviceName: rule.deviceName || node.data.deviceName,
+      entityId: rule.entityId || node.data.entityId,
+    })))
+    .map((rule) => {
+      const deviceEntityId = rule.deviceId ? `device.${rule.deviceId}` : rule.entityId
+      const device = deviceEntityId ? entityById.get(deviceEntityId) : null
+      return device?.friendlyName || rule.deviceName || (String(deviceEntityId || '').startsWith('device.') ? deviceEntityId : '')
+    })
+    .filter(Boolean)
+
+  const uniqueNames = Array.from(new Set(childDeviceNames))
+  return uniqueNames.length === 1 ? uniqueNames[0] : ''
+}
+
 function getVisibleRuntimeStatus(runtimeState, now = Date.now(), forceSnapshot = false) {
   const status = runtimeState?.status || ''
   if (!status) return ''
@@ -652,6 +672,7 @@ function buildDeviceTriggerData(data, device, buttonNumberOverride) {
       ...baseRule,
       entityId: device.entity_id,
       deviceId: device.deviceId,
+      deviceName: device.friendlyName || '',
       deviceIdentifiers: device.attributes?.identifiers ?? [],
       buttonNumber,
       from: '',
@@ -659,6 +680,7 @@ function buildDeviceTriggerData(data, device, buttonNumberOverride) {
     }],
     entityId: device.entity_id,
     deviceId: device.deviceId,
+    deviceName: device.friendlyName || '',
     deviceIdentifiers: device.attributes?.identifiers ?? [],
     buttonNumber,
     from: '',
@@ -783,7 +805,10 @@ function FlowWorkspace() {
   const displayNodes = useMemo(() => nodes.map((node) => ({
     ...node,
     selected: selectedNodeIdSet.has(node.id),
-    data: enrichNodeDisplayData(node.data, entityById, nodeRuntime[node.id], runtimeClock, isInLastRunSnapshot(node.id)),
+    data: {
+      ...enrichNodeDisplayData(node.data, entityById, nodeRuntime[node.id], runtimeClock, isInLastRunSnapshot(node.id)),
+      groupDeviceName: node.data?.kind === 'group' ? getGroupDeviceName(node, nodes, entityById) : undefined,
+    },
   })), [entityById, isInLastRunSnapshot, nodeRuntime, nodes, runtimeClock, selectedNodeIdSet])
   const displayEdges = useMemo(() => edges.map((edge) => {
     const sourceStatus = getVisibleRuntimeStatus(nodeRuntime[edge.source], runtimeClock, isInLastRunSnapshot(edge.source))

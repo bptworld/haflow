@@ -574,13 +574,26 @@ textarea:focus {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  margin: 10px 12px;
+  margin: 10px 12px 0;
   padding: 6px 9px;
   color: #334155;
   background: rgba(255, 255, 255, 0.88);
   border: 1px solid #d8e0e8;
   border-radius: 7px;
   font-weight: 900;
+}
+
+.group-node-device {
+  width: fit-content;
+  max-width: calc(100% - 24px);
+  margin: 8px 12px 0;
+  padding: 3px 9px;
+  overflow: hidden;
+  color: #17202a;
+  font-size: 18px;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .node-header {
@@ -1489,6 +1502,10 @@ textarea:focus {
   color: #e5e7eb;
   background: rgba(15, 23, 42, 0.86);
   border-color: #334155;
+}
+
+.theme-dark .group-node-device {
+  color: #f8fafc;
 }
 
 .theme-dark .node-header,
