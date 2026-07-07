@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.8
+
+- Update the 5-button Pico example to show the grouped controller device-name subtitle.
+
 ## 0.1.7
 
 - Show the selected Pico device name in bold under grouped 5-button controller titles.

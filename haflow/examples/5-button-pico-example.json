@@ -9,7 +9,8 @@
       },
       "data": {
         "kind": "group",
-        "label": "5 Button Pico Controller"
+        "label": "5 Button Pico Controller",
+        "groupDeviceName": "Example Pico Device"
       },
       "style": {
         "width": 760,

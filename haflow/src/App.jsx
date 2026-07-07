@@ -609,7 +609,7 @@ function getGroupDeviceName(groupNode, nodes, entityById) {
     .filter(Boolean)
 
   const uniqueNames = Array.from(new Set(childDeviceNames))
-  return uniqueNames.length === 1 ? uniqueNames[0] : ''
+  return uniqueNames.length === 1 ? uniqueNames[0] : (groupNode.data?.groupDeviceName || '')
 }
 
 function getVisibleRuntimeStatus(runtimeState, now = Date.now(), forceSnapshot = false) {
