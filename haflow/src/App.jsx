@@ -383,6 +383,14 @@ function formatEntityStatus(value) {
   return formatStateOption(value)
 }
 
+function getFlowEntityStatusClass(value) {
+  const normalized = String(value ?? '').toLowerCase()
+  if (normalized === 'on' || normalized === 'open' || normalized === 'detected' || normalized === 'home') return 'is-on'
+  if (normalized === 'off' || normalized === 'closed' || normalized === 'clear' || normalized === 'not_home') return 'is-off'
+  if (normalized === 'unavailable' || normalized === 'unknown') return 'is-unavailable'
+  return 'is-neutral'
+}
+
 function getConditionRules(data) {
   const rules = Array.isArray(data?.conditions) && data.conditions.length
     ? data.conditions
@@ -433,6 +441,49 @@ function getStateTriggerRules(data) {
       from: rule.from ?? '',
       to: rule.to ?? '',
     }))
+}
+
+function collectFlowEntityIds(nodes) {
+  const entityIds = new Set()
+  const addEntityId = (value) => {
+    if (typeof value !== 'string') return
+    const trimmed = value.trim()
+    if (!trimmed || !trimmed.includes('.')) return
+    entityIds.add(trimmed)
+  }
+  const addDeviceId = (value) => {
+    if (typeof value !== 'string') return
+    const trimmed = value.trim()
+    if (!trimmed) return
+    entityIds.add(trimmed.startsWith('device.') ? trimmed : `device.${trimmed}`)
+  }
+  const addEntityValue = (value) => {
+    if (Array.isArray(value)) {
+      value.forEach(addEntityValue)
+      return
+    }
+    if (typeof value === 'string') {
+      value.split(',').map((item) => item.trim()).filter(Boolean).forEach(addEntityId)
+    }
+  }
+
+  nodes.forEach((node) => {
+    const data = node.data ?? {}
+    addEntityValue(data.entityId)
+    addEntityValue(data.entityIds)
+    addDeviceId(data.deviceId)
+    getStateTriggerRules(data).forEach((rule) => {
+      addEntityValue(rule.entityId)
+      addDeviceId(rule.deviceId)
+    })
+    getConditionRules(data).forEach((rule) => addEntityValue(rule.entityId))
+
+    const payload = parsePayloadObject(data.payload)
+    addEntityValue(payload.entity_id)
+    addEntityValue(payload.target?.entity_id)
+  })
+
+  return Array.from(entityIds)
 }
 
 function formatNodeRunTime(value) {
@@ -841,6 +892,17 @@ function FlowWorkspace() {
     if (!queryText) return logs
     return logs.filter((entry) => `${entry.level} ${entry.message} ${new Date(entry.time).toLocaleTimeString()}`.toLowerCase().includes(queryText))
   }, [logQuery, logs])
+  const flowDeviceStatuses = useMemo(() => collectFlowEntityIds(nodes)
+    .map((entityId) => {
+      const entity = entityById.get(entityId)
+      const isDevice = entity?.catalogType === 'device' || entityId.startsWith('device.')
+      return {
+        entityId,
+        name: entity?.friendlyName || entityId,
+        state: isDevice ? 'device' : entity?.state ?? 'unavailable',
+      }
+    })
+    .sort((first, second) => first.name.localeCompare(second.name) || first.entityId.localeCompare(second.entityId)), [entityById, nodes])
   const hasLastRunSnapshot = useMemo(() => nodes.some((node) => nodeRuntime[node.id]?.lastExecutedAt), [nodeRuntime, nodes])
   const lastRunSnapshotId = useMemo(() => {
     const latest = nodes
@@ -1915,6 +1977,22 @@ function FlowWorkspace() {
             />
             <Controls />
           </ReactFlow>
+          {flowDeviceStatuses.length ? (
+            <aside className="flow-device-status" aria-label="Flow device statuses">
+              <div className="flow-device-status-header">
+                <strong>Devices</strong>
+                <span>{flowDeviceStatuses.length}</span>
+              </div>
+              <div className="flow-device-status-list">
+                {flowDeviceStatuses.map((item) => (
+                  <div className="flow-device-status-item" key={item.entityId} title={item.entityId}>
+                    <span>{item.name}</span>
+                    <strong className={getFlowEntityStatusClass(item.state)}>{formatEntityStatus(item.state)}</strong>
+                  </div>
+                ))}
+              </div>
+            </aside>
+          ) : null}
         </div>
       </section>
 

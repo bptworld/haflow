@@ -571,7 +571,92 @@ textarea:focus {
 }
 
 .flow-surface {
+  position: relative;
   min-height: 0;
+}
+
+.flow-device-status {
+  position: absolute;
+  z-index: 12;
+  top: 14px;
+  left: 14px;
+  width: min(340px, calc(100% - 28px));
+  max-height: min(360px, calc(100% - 28px));
+  overflow: hidden;
+  color: #17202a;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  box-shadow: 0 18px 42px rgba(15, 23, 42, 0.14);
+  backdrop-filter: blur(8px);
+}
+
+.flow-device-status-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.flow-device-status-header strong {
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.flow-device-status-header span {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.flow-device-status-list {
+  display: grid;
+  gap: 1px;
+  max-height: 300px;
+  overflow: auto;
+}
+
+.flow-device-status-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 12px;
+  background: rgba(248, 250, 252, 0.72);
+  font-size: 12px;
+}
+
+.flow-device-status-item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flow-device-status-item strong {
+  max-width: 120px;
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flow-device-status-item strong.is-on {
+  color: #0f766e;
+}
+
+.flow-device-status-item strong.is-off {
+  color: #475569;
+}
+
+.flow-device-status-item strong.is-unavailable {
+  color: #be123c;
+}
+
+.flow-device-status-item strong.is-neutral {
+  color: #2563eb;
 }
 
 .flow-node {
@@ -1725,6 +1810,41 @@ textarea:focus {
 .theme-dark .flow-surface,
 .theme-dark .react-flow {
   background: #0f172a;
+}
+
+.theme-dark .flow-device-status {
+  color: #e5e7eb;
+  background: rgba(15, 23, 42, 0.92);
+  border-color: #334155;
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.34);
+}
+
+.theme-dark .flow-device-status-header {
+  border-color: #273449;
+}
+
+.theme-dark .flow-device-status-header span {
+  color: #94a3b8;
+}
+
+.theme-dark .flow-device-status-item {
+  background: rgba(30, 41, 59, 0.78);
+}
+
+.theme-dark .flow-device-status-item strong.is-on {
+  color: #5eead4;
+}
+
+.theme-dark .flow-device-status-item strong.is-off {
+  color: #cbd5e1;
+}
+
+.theme-dark .flow-device-status-item strong.is-unavailable {
+  color: #fb7185;
+}
+
+.theme-dark .flow-device-status-item strong.is-neutral {
+  color: #93c5fd;
 }
 
 .theme-dark .log-modal {

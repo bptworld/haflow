@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.20
+
+- Add an upper-left canvas device status panel showing every entity and device-only trigger used by the current flow in alphabetical order with live Home Assistant state where available.
+
 ## 0.1.19
 
 - Use a cable-style Home Assistant sidebar icon to match the HAFlow header icon.
