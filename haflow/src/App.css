@@ -1350,7 +1350,7 @@ textarea:focus {
 
 .log-modal {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   width: min(980px, calc(100vw - 44px));
   max-height: min(760px, calc(100vh - 44px));
   overflow: hidden;
@@ -1398,6 +1398,27 @@ textarea:focus {
   border: 1px solid #cbd5e1;
   border-radius: 7px;
   cursor: pointer;
+}
+
+.log-modal-search {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  margin: 12px 14px 0;
+  padding: 0 10px;
+  color: #64748b;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 7px;
+}
+
+.log-modal-search input {
+  min-height: 38px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .log-modal-list {
@@ -1697,6 +1718,12 @@ textarea:focus {
 
 .theme-dark .log-modal-actions button {
   color: #e5e7eb;
+  background: #1e293b;
+  border-color: #334155;
+}
+
+.theme-dark .log-modal-search {
+  color: #94a3b8;
   background: #1e293b;
   border-color: #334155;
 }

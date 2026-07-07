@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.16
+
+- Speed up flow execution by running start nodes, branches, and condition checks in parallel.
+- Check service results immediately and retry faster.
+- Add search to the expanded Run Log popup.
+- Force the automatic runner on at app startup.
+
 ## 0.1.15
 
 - Show watched trigger entity IDs in the Run Log startup diagnostics.

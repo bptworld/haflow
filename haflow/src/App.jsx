@@ -821,6 +821,7 @@ function FlowWorkspace() {
   const [isInspectorCollapsed, setIsInspectorCollapsed] = useState(getInitialInspectorCollapsed)
   const [isLibraryCollapsed, setIsLibraryCollapsed] = useState(getInitialLibraryCollapsed)
   const [isLogModalOpen, setIsLogModalOpen] = useState(false)
+  const [logQuery, setLogQuery] = useState('')
   const isDarkTheme = theme === 'dark'
   const { screenToFlowPosition, setViewport: setReactFlowViewport, getViewport } = useReactFlow()
 
@@ -830,6 +831,11 @@ function FlowWorkspace() {
   const activeFlow = flows.find((flow) => flow.id === activeFlowId)
   const sortedFlows = useMemo(() => [...flows].sort((first, second) => first.name.localeCompare(second.name)), [flows])
   const entityById = useMemo(() => new Map(entities.map((entity) => [entity.entity_id, entity])), [entities])
+  const filteredLogs = useMemo(() => {
+    const queryText = logQuery.trim().toLowerCase()
+    if (!queryText) return logs
+    return logs.filter((entry) => `${entry.level} ${entry.message} ${new Date(entry.time).toLocaleTimeString()}`.toLowerCase().includes(queryText))
+  }, [logQuery, logs])
   const hasLastRunSnapshot = useMemo(() => nodes.some((node) => nodeRuntime[node.id]?.lastExecutedAt), [nodeRuntime, nodes])
   const lastRunSnapshotId = useMemo(() => {
     const latest = nodes
@@ -1989,20 +1995,24 @@ function FlowWorkspace() {
             <header>
               <div>
                 <strong>Run Log</strong>
-                <span>{logs.length} entries · live</span>
+                <span>{filteredLogs.length} of {logs.length} entries · live</span>
               </div>
               <div className="log-modal-actions">
                 <button onClick={clearLogs} title="Clear run log" type="button"><Trash2 size={16} /></button>
                 <button onClick={() => setIsLogModalOpen(false)} title="Close run log" type="button"><X size={18} /></button>
               </div>
             </header>
+            <label className="log-modal-search">
+              <Search size={16} />
+              <input value={logQuery} onChange={(event) => setLogQuery(event.target.value)} placeholder="Search run log" />
+            </label>
             <div className="log-modal-list">
-              {logs.length ? logs.map((log, index) => (
+              {filteredLogs.length ? filteredLogs.map((log, index) => (
                 <div className={`log-line ${log.level}`} key={`${log.time}-${index}`}>
                   <span>{new Date(log.time).toLocaleTimeString()}</span>
                   <p>{log.message}</p>
                 </div>
-              )) : <div className="log-empty">No log entries yet</div>}
+              )) : <div className="log-empty">{logs.length ? 'No matching log entries' : 'No log entries yet'}</div>}
             </div>
           </section>
         </div>

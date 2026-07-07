@@ -45,7 +45,8 @@ app.use(express.json({ limit: '10mb' }))
 
 await fs.mkdir(dataDir, { recursive: true })
 await fs.mkdir(flowsDir, { recursive: true })
-config = { ...config, ...(await readJson(configPath, config)) }
+config = { ...config, ...(await readJson(configPath, config)), runnerEnabled: true }
+await writeJson(configPath, config)
 logs = await readJson(logPath, [])
 nodeRuntime = new Map(Object.entries(await readJson(runtimePath, {})))
 runHistory = normalizeRunHistory(await readJson(runHistoryPath, []))
@@ -444,9 +445,7 @@ async function runFlow(flow, startNodeId, options = {}) {
   if (!startNodes.length) throw new Error('Pick a start node or add a trigger with no incoming link.')
   log('info', `Running ${startNodes.length} start node${startNodes.length === 1 ? '' : 's'}.`)
 
-  for (const startNode of startNodes) {
-    await walk(startNode, nodesById, edges, new Set(), options)
-  }
+  await Promise.all(startNodes.map((startNode) => walk(startNode, nodesById, edges, new Set(), options)))
 
   return 'Flow run completed.'
 }
@@ -479,9 +478,7 @@ async function walk(node, nodesById, edges, visited, options = {}) {
     const expectedHandle = shouldContinue ? 'true' : 'false'
     return (edge.sourceHandle || 'true') === expectedHandle
   })
-  for (const edge of nextEdges) {
-    await walk(nodesById.get(edge.target), nodesById, edges, visited, options)
-  }
+  await Promise.all(nextEdges.map((edge) => walk(nodesById.get(edge.target), nodesById, edges, visited, options)))
 }
 
 async function executeNode(node, options = {}) {
@@ -489,8 +486,7 @@ async function executeNode(node, options = {}) {
   const data = node.data ?? {}
   if (data.kind === 'condition') {
     const rules = getConditionRules(data)
-    const results = []
-    for (const rule of rules) {
+    const results = await Promise.all(rules.map(async (rule) => {
       const entity = rule.entityId ? await getEntity(rule.entityId) : null
       const actual = getEntityComparableValue(entity, rule.attribute)
       const expected = String(rule.value ?? '')
@@ -498,8 +494,8 @@ async function executeNode(node, options = {}) {
         rule.operator === 'not_equals' ? actual !== expected :
         rule.operator === 'contains' ? actual.includes(expected) :
         actual === expected
-      results.push({ actual, entityId: rule.entityId, expected, passed })
-    }
+      return { actual, entityId: rule.entityId, expected, passed }
+    }))
     const passed = Boolean(results.length) && (data.conditionMode === 'all' ? results.every((result) => result.passed) : results.some((result) => result.passed))
     const detail = results.map((result) => `${result.entityId || 'entity'} ${result.actual}${result.passed ? '=' : '!='}${result.expected}`).join(', ')
     log(passed ? 'info' : 'warn', `${data.label || 'Condition'} ${passed ? 'passed' : 'stopped'} (${detail}).`)
@@ -781,7 +777,7 @@ async function verifyServiceResult(data, entityIds) {
 
   let states = []
   for (let attempt = 0; attempt < 8; attempt += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 500))
+    if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 250))
     states = await Promise.all(entityIds.map(async (entityId) => {
       try {
         const entity = await getEntity(entityId)
