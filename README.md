@@ -14,9 +14,10 @@ To install this app, follow these steps:
    https://github.com/bptworld/haflow
    ```
 
-4. After adding the repository, scroll to the bottom of the list of apps or use search to find **HAFlow**.
-5. Select **HAFlow** and click **Install**.
-6. Start HAFlow and open it from the app page or sidebar.
+4. After adding the repository, go back to the **App Store**, select the three vertical dots in the upper right-hand corner, and select **Check for updates**.
+5. Scroll down the **App Store** or use search to find **HAFlow**.
+6. Select **HAFlow** and click **Install**.
+7. Start HAFlow and open it from the app page or sidebar.
 
 ## App
 

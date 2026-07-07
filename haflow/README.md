@@ -11,9 +11,11 @@ Install HAFlow by adding the repository to Home Assistant:
 1. Go to Settings > Add-ons > Add-on Store.
 2. Open the menu and choose Repositories.
 3. Add `https://github.com/bptworld/haflow`.
-4. Install HAFlow from the app store.
-5. Start HAFlow.
-6. Open HAFlow from the app page or sidebar.
+4. Go back to the App Store, open the menu, and choose Check for updates.
+5. Scroll down the App Store or use search to find HAFlow.
+6. Select HAFlow and click Install.
+7. Start HAFlow.
+8. Open HAFlow from the app page or sidebar.
 
 ## Features
 
