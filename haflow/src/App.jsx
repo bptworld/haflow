@@ -2,6 +2,7 @@ import { Component, useCallback, useEffect, useMemo, useRef, useState } from 're
 import {
   addEdge,
   Background,
+  ConnectionMode,
   Controls,
   Handle,
   MiniMap,
@@ -1193,7 +1194,22 @@ function FlowWorkspace() {
     return () => socket.close()
   }, [])
 
-  const onConnect = useCallback((params) => setEdges((eds) => addEdge({ ...params, animated: true }, eds)), [setEdges])
+  const onConnect = useCallback((params) => {
+    const sourceNode = nodes.find((node) => node.id === params.source)
+    const targetNode = nodes.find((node) => node.id === params.target)
+    const shouldSwapDirection = sourceNode?.data?.kind === 'end' && targetNode?.data?.kind !== 'end'
+    const connectionParams = shouldSwapDirection
+      ? {
+        source: params.target,
+        sourceHandle: params.targetHandle,
+        target: params.source,
+        targetHandle: params.sourceHandle,
+      }
+      : params
+
+    if (!connectionParams.source || !connectionParams.target || connectionParams.source === connectionParams.target) return
+    setEdges((eds) => addEdge({ ...connectionParams, animated: true }, eds))
+  }, [nodes, setEdges])
 
   const onDrop = useCallback((event) => {
     event.preventDefault()
@@ -1984,6 +2000,8 @@ function FlowWorkspace() {
             nodes={displayNodes}
             edges={displayEdges}
             nodeTypes={nodeTypes}
+            connectionMode={ConnectionMode.Loose}
+            connectionRadius={36}
             onConnect={onConnect}
             onEdgesChange={onEdgesChange}
             onNodesChange={onNodesChange}

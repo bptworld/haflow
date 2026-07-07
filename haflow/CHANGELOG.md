@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.24
+
+- Make tight canvas connections easier by increasing the snap radius and allowing loose handle starts while keeping End nodes terminal-safe.
+
 ## 0.1.23
 
 - Make the outgoing-link validation rule explicit so action and terminal nodes can intentionally end a branch without warnings.
