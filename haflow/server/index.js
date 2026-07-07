@@ -648,7 +648,7 @@ async function triggerNode(flow, flowMeta, node, { reason }) {
   broadcastRunner()
   const startedAt = new Date().toISOString()
   try {
-    log('info', `${flowMeta.name}: ${node.data?.label || node.id} triggered by ${reason}.`)
+    log('activated', `Flow Activated: ${flowMeta.name}: ${node.data?.label || node.id}`)
     const result = await runFlow(flow, node.id, { runId: run.id, skipStartExecution: node.id, signal: run.controller.signal })
     await finishRunHistory({
       id: run.id,

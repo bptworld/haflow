@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.17
+
+- Show flow activation log entries as green `Flow Activated` messages.
+- Highlight warning log entries in orange and error log entries in red.
+
 ## 0.1.16
 
 - Speed up flow execution by running start nodes, branches, and condition checks in parallel.

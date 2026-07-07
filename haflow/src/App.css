@@ -1319,12 +1319,33 @@ textarea:focus {
   border-left-color: #0f766e;
 }
 
+.log-line.activated {
+  color: #065f46;
+  background: #ecfdf5;
+  border-left-color: #22c55e;
+}
+
+.log-line.activated p {
+  color: inherit;
+  font-weight: 900;
+}
+
 .log-line.warn {
+  color: #92400e;
+  background: #fffbeb;
   border-left-color: #b45309;
 }
 
 .log-line.error {
+  color: #9f1239;
+  background: #fff1f2;
   border-left-color: #be123c;
+}
+
+.log-line.warn p,
+.log-line.error p {
+  color: inherit;
+  font-weight: 900;
 }
 
 .log-line.debug {
@@ -1669,7 +1690,8 @@ textarea:focus {
 }
 
 .theme-dark .save-status,
-.theme-dark .validation-ok {
+.theme-dark .validation-ok,
+.theme-dark .log-line.activated {
   color: #99f6e4;
   background: rgba(20, 184, 166, 0.16);
   border-color: rgba(94, 234, 212, 0.38);
