@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.29
+
+- Reduce connection snapping so link lines feel stable again when lining up handles.
+
 ## 0.1.28
 
 - Highlight paused flows in orange in the flow dropdown and selected flow field.

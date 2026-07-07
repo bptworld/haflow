@@ -2,7 +2,6 @@ import { Component, useCallback, useEffect, useMemo, useRef, useState } from 're
 import {
   addEdge,
   Background,
-  ConnectionMode,
   Controls,
   Handle,
   MiniMap,
@@ -2095,8 +2094,7 @@ function FlowWorkspace() {
             nodes={displayNodes}
             edges={displayEdges}
             nodeTypes={nodeTypes}
-            connectionMode={ConnectionMode.Loose}
-            connectionRadius={36}
+            connectionRadius={18}
             onConnect={onConnect}
             onEdgesChange={onEdgesChange}
             onNodesChange={onNodesChange}
