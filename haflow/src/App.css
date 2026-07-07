@@ -422,6 +422,28 @@ textarea:focus {
   font-size: 12px;
 }
 
+.compact-log-panel {
+  margin-top: 18px;
+}
+
+.compact-log-window {
+  display: grid;
+  width: 100%;
+  max-height: 430px;
+  gap: 6px;
+  padding: 0;
+  overflow: hidden;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.compact-log-window:hover .log-line,
+.compact-log-window:focus-visible .log-line {
+  border-color: #94a3b8;
+  background: #f8fafc;
+}
+
 .canvas-panel {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
@@ -1275,6 +1297,15 @@ textarea:focus {
   padding-right: 3px;
 }
 
+.log-empty {
+  padding: 12px 10px;
+  color: #64748b;
+  background: #ffffff;
+  border: 1px solid #d8e0e8;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
 .log-line {
   display: grid;
   gap: 3px;
@@ -1305,6 +1336,77 @@ textarea:focus {
   color: #17202a;
   font-size: 12px;
   line-height: 1.35;
+}
+
+.log-modal-backdrop {
+  position: fixed;
+  z-index: 80;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 28px;
+  background: rgba(15, 23, 42, 0.46);
+}
+
+.log-modal {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  width: min(980px, calc(100vw - 44px));
+  max-height: min(760px, calc(100vh - 44px));
+  overflow: hidden;
+  background: #fbfcfe;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  box-shadow: 0 24px 80px rgba(15, 23, 42, 0.32);
+}
+
+.log-modal header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border-bottom: 1px solid #d8e0e8;
+}
+
+.log-modal header div:first-child {
+  display: grid;
+  gap: 2px;
+}
+
+.log-modal header strong {
+  font-size: 18px;
+}
+
+.log-modal header span {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.log-modal-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.log-modal-actions button {
+  display: inline-grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  color: #17202a;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.log-modal-list {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-height: 0;
+  padding: 14px;
+  overflow-y: auto;
 }
 
 .app-error {
@@ -1437,7 +1539,9 @@ textarea:focus {
 .theme-dark .entity-list small,
 .theme-dark .entity-type-heading,
 .theme-dark .empty-state,
-.theme-dark .entity-empty {
+.theme-dark .entity-empty,
+.theme-dark .log-empty,
+.theme-dark .log-modal header span {
   color: #94a3b8;
 }
 
@@ -1473,6 +1577,7 @@ textarea:focus {
 .theme-dark .search-box,
 .theme-dark .entity-list button,
 .theme-dark .entity-empty,
+.theme-dark .log-empty,
 .theme-dark .log-line {
   color: #e5e7eb;
   background: #1e293b;
@@ -1500,7 +1605,10 @@ textarea:focus {
 .theme-dark .flow-library-actions button:hover:not(:disabled),
 .theme-dark .library-actions button:hover:not(:disabled),
 .theme-dark .secondary-action:hover:not(:disabled),
-.theme-dark .section-title-row button:hover {
+.theme-dark .section-title-row button:hover,
+.theme-dark .compact-log-window:hover .log-line,
+.theme-dark .compact-log-window:focus-visible .log-line,
+.theme-dark .log-modal-actions button:hover {
   color: #f8fafc;
   background: #263449;
   border-color: #64748b;
@@ -1574,6 +1682,23 @@ textarea:focus {
 .theme-dark .flow-surface,
 .theme-dark .react-flow {
   background: #0f172a;
+}
+
+.theme-dark .log-modal {
+  color: #e5e7eb;
+  background: #111827;
+  border-color: #334155;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.46);
+}
+
+.theme-dark .log-modal header {
+  border-color: #273449;
+}
+
+.theme-dark .log-modal-actions button {
+  color: #e5e7eb;
+  background: #1e293b;
+  border-color: #334155;
 }
 
 .theme-dark .flow-node {

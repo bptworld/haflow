@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.14
+
+- Move the Run Log under the left panel runner controls.
+- Show a compact live 10-entry log preview with a wide scrollable popup.
+
 ## 0.1.13
 
 - Add trigger diagnostics for watched Home Assistant entity changes.

@@ -820,6 +820,7 @@ function FlowWorkspace() {
   const [theme, setTheme] = useState(getInitialTheme)
   const [isInspectorCollapsed, setIsInspectorCollapsed] = useState(getInitialInspectorCollapsed)
   const [isLibraryCollapsed, setIsLibraryCollapsed] = useState(getInitialLibraryCollapsed)
+  const [isLogModalOpen, setIsLogModalOpen] = useState(false)
   const isDarkTheme = theme === 'dark'
   const { screenToFlowPosition, setViewport: setReactFlowViewport, getViewport } = useReactFlow()
 
@@ -1794,6 +1795,20 @@ function FlowWorkspace() {
           </div>
           <span>{activeFlow?.paused ? 'Resume this flow to allow manual or automatic runs' : runner.connected ? 'HA stream online' : 'HA stream idle'}</span>
         </div>
+        <section className="compact-log-panel">
+          <div className="section-title section-title-row">
+            <span>Run Log</span>
+            <button onClick={clearLogs} title="Clear run log" type="button"><Trash2 size={14} /></button>
+          </div>
+          <button className="compact-log-window" onClick={() => setIsLogModalOpen(true)} type="button">
+            {logs.length ? logs.slice(0, 10).map((log, index) => (
+              <div className={`log-line ${log.level}`} key={`${log.time}-${index}`}>
+                <span>{new Date(log.time).toLocaleTimeString()}</span>
+                <p>{log.message}</p>
+              </div>
+            )) : <div className="log-empty">No log entries yet</div>}
+          </button>
+        </section>
       </aside>
 
       <section className="canvas-panel" ref={wrapperRef}>
@@ -1965,20 +1980,33 @@ function FlowWorkspace() {
               <div className="entity-empty">No matching entities</div>
             )}
           </div>
-          <div className="section-title section-title-row">
-            <span>Run Log</span>
-            <button onClick={clearLogs} title="Clear run log" type="button"><Trash2 size={14} /></button>
-          </div>
-          <div className="log-list">
-            {logs.map((log, index) => (
-              <div className={`log-line ${log.level}`} key={`${log.time}-${index}`}>
-                <span>{new Date(log.time).toLocaleTimeString()}</span>
-                <p>{log.message}</p>
-              </div>
-            ))}
-          </div>
         </div>
       </aside>
+
+      {isLogModalOpen ? (
+        <div className="log-modal-backdrop" onMouseDown={() => setIsLogModalOpen(false)}>
+          <section className="log-modal" onMouseDown={(event) => event.stopPropagation()}>
+            <header>
+              <div>
+                <strong>Run Log</strong>
+                <span>{logs.length} entries · live</span>
+              </div>
+              <div className="log-modal-actions">
+                <button onClick={clearLogs} title="Clear run log" type="button"><Trash2 size={16} /></button>
+                <button onClick={() => setIsLogModalOpen(false)} title="Close run log" type="button"><X size={18} /></button>
+              </div>
+            </header>
+            <div className="log-modal-list">
+              {logs.length ? logs.map((log, index) => (
+                <div className={`log-line ${log.level}`} key={`${log.time}-${index}`}>
+                  <span>{new Date(log.time).toLocaleTimeString()}</span>
+                  <p>{log.message}</p>
+                </div>
+              )) : <div className="log-empty">No log entries yet</div>}
+            </div>
+          </section>
+        </div>
+      ) : null}
     </main>
   )
 }
