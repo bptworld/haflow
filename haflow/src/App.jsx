@@ -17,6 +17,12 @@ import packageInfo from '../package.json'
 import {
   Activity,
   AlertTriangle,
+  AlignHorizontalJustifyCenter,
+  AlignHorizontalJustifyEnd,
+  AlignHorizontalJustifyStart,
+  AlignVerticalJustifyCenter,
+  AlignVerticalJustifyEnd,
+  AlignVerticalJustifyStart,
   Bell,
   Cable,
   Check,
@@ -796,6 +802,13 @@ function FlowWorkspace() {
       .sort((first, second) => Date.parse(second.lastExecutedAt) - Date.parse(first.lastExecutedAt))[0]
     return latest?.runId || (latest ? '__legacy_last_run__' : '')
   }, [nodeRuntime, nodes])
+  const lastTriggeredAt = useMemo(() => {
+    const latest = nodes
+      .map((node) => nodeRuntime[node.id])
+      .filter((runtime) => runtime?.lastExecutedAt)
+      .sort((first, second) => Date.parse(second.lastExecutedAt) - Date.parse(first.lastExecutedAt))[0]
+    return latest?.lastExecutedAt || ''
+  }, [nodeRuntime, nodes])
   const isInLastRunSnapshot = useCallback((nodeId) => {
     if (!showLastRunSnapshot || !lastRunSnapshotId) return false
     const runtime = nodeRuntime[nodeId]
@@ -1244,6 +1257,70 @@ function FlowWorkspace() {
     setSelectedEdgeId(null)
   }, [edges, nodes, selectedId, selectedNodeIds, setEdges, setNodes])
 
+  const alignSelectedNodes = useCallback((alignment) => {
+    const selectedNodes = nodes.filter((node) => selectedNodeIdSet.has(node.id))
+    if (selectedNodes.length < 2) return
+
+    const nodeById = new Map(nodes.map((node) => [node.id, node]))
+    const boxes = selectedNodes.map((node) => {
+      const absolute = getAbsoluteNodePosition(node, nodeById)
+      const size = getNodeSize(node)
+      return {
+        id: node.id,
+        absolute,
+        size,
+        left: absolute.x,
+        right: absolute.x + size.width,
+        top: absolute.y,
+        bottom: absolute.y + size.height,
+      }
+    })
+    const bounds = {
+      left: Math.min(...boxes.map((box) => box.left)),
+      right: Math.max(...boxes.map((box) => box.right)),
+      top: Math.min(...boxes.map((box) => box.top)),
+      bottom: Math.max(...boxes.map((box) => box.bottom)),
+    }
+    const targetCenterX = bounds.left + ((bounds.right - bounds.left) / 2)
+    const targetCenterY = bounds.top + ((bounds.bottom - bounds.top) / 2)
+    const boxById = new Map(boxes.map((box) => [box.id, box]))
+
+    setNodes((current) => {
+      const currentById = new Map(current.map((node) => [node.id, node]))
+      const parentPositionById = new Map()
+      const getParentAbsolutePosition = (parentId) => {
+        if (!parentId) return { x: 0, y: 0 }
+        if (parentPositionById.has(parentId)) return parentPositionById.get(parentId)
+        const parent = currentById.get(parentId)
+        const absolute = parent ? getAbsoluteNodePosition(parent, currentById) : { x: 0, y: 0 }
+        parentPositionById.set(parentId, absolute)
+        return absolute
+      }
+
+      return current.map((node) => {
+        const box = boxById.get(node.id)
+        if (!box) return node
+
+        const nextAbsolute = { ...box.absolute }
+        if (alignment === 'left') nextAbsolute.x = bounds.left
+        if (alignment === 'center-x') nextAbsolute.x = targetCenterX - (box.size.width / 2)
+        if (alignment === 'right') nextAbsolute.x = bounds.right - box.size.width
+        if (alignment === 'top') nextAbsolute.y = bounds.top
+        if (alignment === 'middle-y') nextAbsolute.y = targetCenterY - (box.size.height / 2)
+        if (alignment === 'bottom') nextAbsolute.y = bounds.bottom - box.size.height
+
+        const parentAbsolute = getParentAbsolutePosition(node.parentId)
+        return {
+          ...node,
+          position: {
+            x: nextAbsolute.x - parentAbsolute.x,
+            y: nextAbsolute.y - parentAbsolute.y,
+          },
+        }
+      })
+    })
+  }, [nodes, selectedNodeIdSet, setNodes])
+
   const saveFlow = useCallback(async ({ silent = false, nextViewport } = {}) => {
     const viewportToSave = normalizeViewport(nextViewport ?? viewportRef.current ?? getViewport())
     setSaveStatus('saving')
@@ -1612,7 +1689,7 @@ function FlowWorkspace() {
           <div className="toolbar-main">
             <div className="toolbar-title-row">
               <strong>{activeFlow?.name || 'Automation canvas'}</strong>
-              <span>{nodes.length} nodes, {edges.length} links, {validationIssues.length} issues</span>
+              <span>{nodes.length} nodes, {edges.length} links, {validationIssues.length} errors · Last Triggered: {lastTriggeredAt ? formatNodeRunTime(lastTriggeredAt) : 'Never'}</span>
             </div>
             <span className="shortcut-hint">Ctrl+Z undo · Ctrl+S save · Ctrl+Enter run · Ctrl+D duplicate · Ctrl+G group</span>
           </div>
@@ -1637,6 +1714,16 @@ function FlowWorkspace() {
               <button onClick={deleteSelected} disabled={!hasNodeSelection && !selectedEdgeId} title="Delete selected" type="button"><Trash2 size={18} /></button>
             </div>
           </div>
+          {selectedNodeIds.length > 1 ? (
+            <div className="toolbar-align-row" aria-label="Align selected nodes">
+              <button onClick={() => alignSelectedNodes('left')} title="Align left" type="button"><AlignHorizontalJustifyStart size={17} /></button>
+              <button onClick={() => alignSelectedNodes('center-x')} title="Align center" type="button"><AlignHorizontalJustifyCenter size={17} /></button>
+              <button onClick={() => alignSelectedNodes('right')} title="Align right" type="button"><AlignHorizontalJustifyEnd size={17} /></button>
+              <button onClick={() => alignSelectedNodes('top')} title="Align top" type="button"><AlignVerticalJustifyStart size={17} /></button>
+              <button onClick={() => alignSelectedNodes('middle-y')} title="Align middle" type="button"><AlignVerticalJustifyCenter size={17} /></button>
+              <button onClick={() => alignSelectedNodes('bottom')} title="Align bottom" type="button"><AlignVerticalJustifyEnd size={17} /></button>
+            </div>
+          ) : null}
           <input accept="application/json" className="hidden-input" onChange={importFlow} ref={importRef} type="file" />
         </header>
         <div className="flow-surface" onDragOver={(event) => event.preventDefault()} onDrop={onDrop}>

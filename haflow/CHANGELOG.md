@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.9
+
+- Show the latest flow trigger time in the toolbar summary.
+- Add multi-node alignment controls that appear only when multiple nodes are selected.
+
 ## 0.1.8
 
 - Update the 5-button Pico example to show the grouped controller device-name subtitle.

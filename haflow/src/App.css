@@ -178,6 +178,7 @@ button {
 .palette-item,
 .primary-action,
 .toolbar-actions button,
+.toolbar-align-row button,
 .entity-list button {
   cursor: pointer;
 }
@@ -198,7 +199,8 @@ button {
 
 .palette-item:hover,
 .entity-list button:hover,
-.toolbar-actions button:hover:not(:disabled) {
+.toolbar-actions button:hover:not(:disabled),
+.toolbar-align-row button:hover {
   border-color: #94a3b8;
   background: #f8fafc;
 }
@@ -436,7 +438,8 @@ textarea:focus {
 }
 
 .toolbar-title-row span {
-  flex: 0 0 auto;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .shortcut-hint {
@@ -482,7 +485,8 @@ textarea:focus {
   min-width: 0;
 }
 
-.toolbar-actions button {
+.toolbar-actions button,
+.toolbar-align-row button {
   display: inline-grid;
   width: 38px;
   height: 38px;
@@ -502,6 +506,19 @@ textarea:focus {
   color: white;
   background: #0f766e;
   border-color: #0f766e;
+}
+
+.toolbar-align-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  margin-left: 102px;
+}
+
+.toolbar-align-row button {
+  width: 34px;
+  height: 34px;
 }
 
 .hidden-input {
@@ -1306,6 +1323,10 @@ textarea:focus {
     flex-direction: column;
     gap: 6px;
   }
+
+  .toolbar-align-row {
+    margin-left: 0;
+  }
 }
 
 .theme-dark {
@@ -1363,6 +1384,7 @@ textarea:focus {
 .theme-dark .managed-connection,
 .theme-dark .runner-card,
 .theme-dark .toolbar-actions button,
+.theme-dark .toolbar-align-row button,
 .theme-dark .tabs button,
 .theme-dark .inspector-reopen,
 .theme-dark .flow-node,
@@ -1393,6 +1415,7 @@ textarea:focus {
 .theme-dark .palette-item:hover,
 .theme-dark .entity-list button:hover,
 .theme-dark .toolbar-actions button:hover:not(:disabled),
+.theme-dark .toolbar-align-row button:hover,
 .theme-dark .tabs button:hover,
 .theme-dark .inspector-reopen:hover,
 .theme-dark .flow-library-actions button:hover:not(:disabled),
