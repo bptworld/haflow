@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.11
+
+- Make the Library section collapsible and remember its open or closed state.
+- Move single-flow import and export actions into the Library section with backup actions.
+
 ## 0.1.10
 
 - Add whole-library backup export and import for all saved flows.

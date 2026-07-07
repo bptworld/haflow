@@ -69,6 +69,21 @@ body,
   text-transform: uppercase;
 }
 
+.collapsible-section-title {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.collapsible-section-title svg {
+  color: #64748b;
+}
+
 .section-title-row {
   display: flex;
   align-items: center;
@@ -1427,6 +1442,7 @@ textarea:focus {
 }
 
 .theme-dark .section-title,
+.theme-dark .collapsible-section-title,
 .theme-dark label,
 .theme-dark .mini-heading,
 .theme-dark .condition-rule-header span,
@@ -1491,6 +1507,10 @@ textarea:focus {
 }
 
 .theme-dark .section-title-row button {
+  color: #94a3b8;
+}
+
+.theme-dark .collapsible-section-title svg {
   color: #94a3b8;
 }
 

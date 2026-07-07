@@ -26,6 +26,8 @@ import {
   Bell,
   Cable,
   Check,
+  ChevronDown,
+  ChevronRight,
   Clock,
   Copy,
   Download,
@@ -194,6 +196,10 @@ function getInitialTheme() {
 
 function getInitialInspectorCollapsed() {
   return window.localStorage.getItem('haflow-inspector-collapsed') === 'true'
+}
+
+function getInitialLibraryCollapsed() {
+  return window.localStorage.getItem('haflow-library-collapsed') === 'true'
 }
 
 function createId() {
@@ -813,6 +819,7 @@ function FlowWorkspace() {
   const [showLastRunSnapshot, setShowLastRunSnapshot] = useState(false)
   const [theme, setTheme] = useState(getInitialTheme)
   const [isInspectorCollapsed, setIsInspectorCollapsed] = useState(getInitialInspectorCollapsed)
+  const [isLibraryCollapsed, setIsLibraryCollapsed] = useState(getInitialLibraryCollapsed)
   const isDarkTheme = theme === 'dark'
   const { screenToFlowPosition, setViewport: setReactFlowViewport, getViewport } = useReactFlow()
 
@@ -933,6 +940,10 @@ function FlowWorkspace() {
   useEffect(() => {
     window.localStorage.setItem('haflow-inspector-collapsed', String(isInspectorCollapsed))
   }, [isInspectorCollapsed])
+
+  useEffect(() => {
+    window.localStorage.setItem('haflow-library-collapsed', String(isLibraryCollapsed))
+  }, [isLibraryCollapsed])
 
   useEffect(() => {
     Promise.all([
@@ -1725,12 +1736,19 @@ function FlowWorkspace() {
             <button className="delete-flow" disabled={activeFlowId === 'default'} onClick={deleteFlow} title="Delete flow" type="button"><Trash2 size={16} /></button>
           </div>
         </div>
-        <div className="section-title">Library</div>
-        <div className="library-actions">
-          <button onClick={addStarterPack} title="Add starter flows" type="button"><FilePlus size={16} /> Starter Pack</button>
-          <button onClick={exportBackup} title="Export all flows" type="button"><Download size={16} /> Export Backup</button>
-          <button onClick={() => backupImportRef.current?.click()} title="Import all-flow backup" type="button"><Upload size={16} /> Import Backup</button>
-        </div>
+        <button className="section-title collapsible-section-title" onClick={() => setIsLibraryCollapsed((current) => !current)} type="button">
+          <span>Library</span>
+          {isLibraryCollapsed ? <ChevronRight size={15} /> : <ChevronDown size={15} />}
+        </button>
+        {!isLibraryCollapsed ? (
+          <div className="library-actions">
+            <button onClick={exportFlow} title="Export current flow" type="button"><Download size={16} /> Export Flow</button>
+            <button onClick={() => importRef.current?.click()} title="Import flow into current canvas" type="button"><Upload size={16} /> Import Flow</button>
+            <button onClick={exportBackup} title="Export all flows" type="button"><Download size={16} /> Export Backup</button>
+            <button onClick={() => backupImportRef.current?.click()} title="Import all-flow backup" type="button"><Upload size={16} /> Import Backup</button>
+            <button onClick={addStarterPack} title="Add starter flows" type="button"><FilePlus size={16} /> Starter Pack</button>
+          </div>
+        ) : null}
         <div className="section-title">Nodes</div>
         <div className="node-palette">
           {nodeCatalog.map((item) => {
@@ -1802,8 +1820,6 @@ function FlowWorkspace() {
               </button>
               <button className={showLastRunSnapshot ? 'is-active' : ''} onClick={() => setShowLastRunSnapshot((current) => !current)} disabled={!hasLastRunSnapshot} title="Show last run snapshot" type="button"><History size={18} /></button>
               <button className={runner.enabled ? 'is-active' : ''} onClick={toggleRunner} title="Toggle automatic runner" type="button"><Power size={18} /></button>
-              <button onClick={exportFlow} title="Export flow" type="button"><Download size={18} /></button>
-              <button onClick={() => importRef.current?.click()} title="Import flow" type="button"><Upload size={18} /></button>
               <button onClick={groupSelected} disabled={!hasNodeSelection} title="Group selected" type="button"><ListTree size={18} /></button>
               <button onClick={duplicateSelected} disabled={!hasNodeSelection} title="Duplicate selected" type="button"><Copy size={18} /></button>
               <button onClick={deleteSelected} disabled={!hasNodeSelection && !selectedEdgeId} title="Delete selected" type="button"><Trash2 size={18} /></button>
