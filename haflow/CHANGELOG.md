@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.30
+
+- Limit paused flow highlighting to only the `[Paused]` marker in the flow picker.
+
 ## 0.1.29
 
 - Reduce connection snapping so link lines feel stable again when lining up handles.

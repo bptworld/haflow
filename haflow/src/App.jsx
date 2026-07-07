@@ -1017,6 +1017,7 @@ function FlowWorkspace() {
   const [isRunHistoryCollapsed, setIsRunHistoryCollapsed] = useState(getInitialRunHistoryCollapsed)
   const [isLogModalOpen, setIsLogModalOpen] = useState(false)
   const [logQuery, setLogQuery] = useState('')
+  const [isFlowMenuOpen, setIsFlowMenuOpen] = useState(false)
   const isDarkTheme = theme === 'dark'
   const { screenToFlowPosition, setViewport: setReactFlowViewport, getViewport } = useReactFlow()
 
@@ -1954,13 +1955,42 @@ function FlowWorkspace() {
         </div>
         <div className="section-title">Flows</div>
         <div className="flow-library">
-          <select className={activeFlow?.paused ? 'flow-select is-paused' : 'flow-select'} value={activeFlowId} onChange={(event) => loadFlow(event.target.value)}>
-            {sortedFlows.map((flow) => (
-              <option className={flow.paused ? 'flow-option-paused' : ''} key={flow.id} value={flow.id}>
-                {flow.paused ? '[Paused] ' : ''}{flow.name}
-              </option>
-            ))}
-          </select>
+          <div className="flow-select-menu" onBlur={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget)) setIsFlowMenuOpen(false)
+          }}>
+            <button
+              aria-expanded={isFlowMenuOpen}
+              className="flow-select-trigger"
+              onClick={() => setIsFlowMenuOpen((current) => !current)}
+              type="button"
+            >
+              <span>
+                {activeFlow?.paused ? <span className="paused-token">[Paused]</span> : null}
+                {activeFlow?.name || 'Select flow'}
+              </span>
+              <ChevronDown size={16} />
+            </button>
+            {isFlowMenuOpen ? (
+              <div className="flow-select-options" role="listbox">
+                {sortedFlows.map((flow) => (
+                  <button
+                    aria-selected={flow.id === activeFlowId}
+                    className={flow.id === activeFlowId ? 'is-active' : ''}
+                    key={flow.id}
+                    onClick={() => {
+                      loadFlow(flow.id)
+                      setIsFlowMenuOpen(false)
+                    }}
+                    role="option"
+                    type="button"
+                  >
+                    {flow.paused ? <span className="paused-token">[Paused]</span> : null}
+                    <span>{flow.name}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
           {activeFlow?.paused ? <div className="flow-paused-badge">Paused</div> : null}
           <input value={newFlowName} onChange={(event) => setNewFlowName(event.target.value)} placeholder="New flow name" />
           <div className="flow-library-actions">

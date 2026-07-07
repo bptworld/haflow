@@ -187,15 +187,72 @@ body,
   text-transform: uppercase;
 }
 
-.flow-select.is-paused {
+.paused-token {
   color: #92400e;
-  background: #fffbeb;
-  border-color: #fbbf24;
+  font-weight: 900;
 }
 
-.flow-option-paused {
-  color: #92400e;
-  background: #fffbeb;
+.flow-select-menu {
+  position: relative;
+}
+
+.flow-select-trigger {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 46px;
+  padding: 0 12px;
+  color: #17202a;
+  background: #ffffff;
+  border: 1px solid #d8e0e8;
+  border-radius: 7px;
+  text-align: left;
+}
+
+.flow-select-trigger span,
+.flow-select-options button span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flow-select-options {
+  position: absolute;
+  z-index: 40;
+  inset: calc(100% + 2px) 0 auto 0;
+  display: grid;
+  max-height: 280px;
+  overflow: auto;
+  padding: 0;
+  color: #17202a;
+  background: #ffffff;
+  border: 1px solid #94a3b8;
+  box-shadow: 0 18px 42px rgba(15, 23, 42, 0.16);
+}
+
+.flow-select-options button {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 32px;
+  padding: 0 16px;
+  color: inherit;
+  background: transparent;
+  text-align: left;
+}
+
+.flow-select-options button:hover,
+.flow-select-options button.is-active {
+  color: #ffffff;
+  background: #2563eb;
+}
+
+.flow-select-options button:hover .paused-token,
+.flow-select-options button.is-active .paused-token {
+  color: #fcd34d;
 }
 
 button,
@@ -1797,12 +1854,27 @@ textarea:focus {
 .theme-dark .save-status.saving,
 .theme-dark .save-status.loading,
 .theme-dark .flow-library-actions .pause-flow,
-.theme-dark .flow-paused-badge,
-.theme-dark .flow-select.is-paused,
-.theme-dark .flow-option-paused {
+.theme-dark .flow-paused-badge {
   color: #fcd34d;
   background: rgba(180, 83, 9, 0.18);
   border-color: rgba(251, 191, 36, 0.38);
+}
+
+.theme-dark .paused-token {
+  color: #fcd34d;
+}
+
+.theme-dark .flow-select-trigger,
+.theme-dark .flow-select-options {
+  color: #e5e7eb;
+  background: #1e293b;
+  border-color: #334155;
+}
+
+.theme-dark .flow-select-options button:hover,
+.theme-dark .flow-select-options button.is-active {
+  color: #ffffff;
+  background: #2563eb;
 }
 
 .theme-dark .flow-library-actions .resume-flow {
