@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.26
+
+- Tighten binary sensor state labels to match Home Assistant device-class meanings for motion, occupancy, presence, contact/opening, light, lock, and power sensors.
+- Infer common binary sensor classes from entity names when Home Assistant does not provide a device class.
+
 ## 0.1.25
 
 - Change node tile summaries to describe configured behavior instead of showing current entity status now that the canvas Devices panel shows live status.

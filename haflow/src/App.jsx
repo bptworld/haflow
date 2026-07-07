@@ -73,20 +73,21 @@ const BINARY_SENSOR_STATE_LABELS = {
   carbon_monoxide: { on: 'Detected', off: 'Clear' },
   cold: { on: 'Cold', off: 'Normal' },
   connectivity: { on: 'Connected', off: 'Disconnected' },
+  contact: { on: 'Open', off: 'Closed' },
   door: { on: 'Open', off: 'Closed' },
   garage_door: { on: 'Open', off: 'Closed' },
   gas: { on: 'Detected', off: 'Clear' },
   heat: { on: 'Hot', off: 'Normal' },
-  light: { on: 'Detected', off: 'Clear' },
-  lock: { on: 'Unlocked', off: 'Locked' },
+  light: { on: 'Light Detected', off: 'No Light' },
+  lock: { on: 'Open', off: 'Closed' },
   moisture: { on: 'Wet', off: 'Dry' },
   motion: { on: 'Detected', off: 'Clear' },
   moving: { on: 'Moving', off: 'Stopped' },
-  occupancy: { on: 'Detected', off: 'Clear' },
+  occupancy: { on: 'Occupied', off: 'Clear' },
   opening: { on: 'Open', off: 'Closed' },
   plug: { on: 'Plugged In', off: 'Unplugged' },
-  power: { on: 'Powered', off: 'No Power' },
-  presence: { on: 'Detected', off: 'Clear' },
+  power: { on: 'Power Detected', off: 'No Power' },
+  presence: { on: 'Home', off: 'Away' },
   problem: { on: 'Problem', off: 'OK' },
   running: { on: 'Running', off: 'Not Running' },
   safety: { on: 'Unsafe', off: 'Safe' },
@@ -452,8 +453,29 @@ function formatEntityStatus(value, entity) {
 
 function getStateLabelMap(entity) {
   if (entity?.domain !== 'binary_sensor') return null
-  const deviceClass = String(entity.attributes?.device_class || '').toLowerCase()
+  const deviceClass = String(entity.attributes?.device_class || inferBinarySensorClass(entity)).toLowerCase()
   return BINARY_SENSOR_STATE_LABELS[deviceClass] || { on: 'On', off: 'Off' }
+}
+
+function inferBinarySensorClass(entity) {
+  const haystack = [
+    entity?.friendlyName,
+    entity?.entity_id,
+    entity?.deviceType,
+  ].join(' ').toLowerCase()
+  if (/\b(door|gate|garage door)\b/.test(haystack)) return 'door'
+  if (/\b(window)\b/.test(haystack)) return 'window'
+  if (/\b(contact|opening)\b/.test(haystack)) return 'opening'
+  if (/\b(motion|movement)\b/.test(haystack)) return 'motion'
+  if (/\b(occupancy|occupied)\b/.test(haystack)) return 'occupancy'
+  if (/\b(presence|present)\b/.test(haystack)) return 'presence'
+  if (/\b(moisture|water|leak|wet)\b/.test(haystack)) return 'moisture'
+  if (/\b(smoke)\b/.test(haystack)) return 'smoke'
+  if (/\b(carbon monoxide|co)\b/.test(haystack)) return 'carbon_monoxide'
+  if (/\b(gas)\b/.test(haystack)) return 'gas'
+  if (/\b(tamper)\b/.test(haystack)) return 'tamper'
+  if (/\b(vibration)\b/.test(haystack)) return 'vibration'
+  return ''
 }
 
 function getFlowEntityStatusClass(value) {
