@@ -1,0 +1,94 @@
+{
+  "nodes": [
+    {
+      "id": "trigger-motion",
+      "type": "haflow",
+      "position": {
+        "x": 80,
+        "y": 90
+      },
+      "data": {
+        "kind": "state",
+        "label": "Motion Detected",
+        "entityId": "binary_sensor.example_motion",
+        "from": "off",
+        "to": "on",
+        "triggers": [
+          {
+            "id": "trigger-motion-rule",
+            "entityId": "binary_sensor.example_motion",
+            "deviceId": "",
+            "deviceIdentifiers": [],
+            "from": "off",
+            "to": "on"
+          }
+        ]
+      }
+    },
+    {
+      "id": "condition-sun",
+      "type": "haflow",
+      "position": {
+        "x": 380,
+        "y": 90
+      },
+      "data": {
+        "kind": "condition",
+        "label": "After Sunset",
+        "entityId": "sun.sun",
+        "attribute": "state",
+        "operator": "equals",
+        "value": "below_horizon",
+        "conditionMode": "any",
+        "conditions": [
+          {
+            "id": "condition-sun-rule",
+            "entityId": "sun.sun",
+            "attribute": "state",
+            "operator": "equals",
+            "value": "below_horizon"
+          }
+        ]
+      }
+    },
+    {
+      "id": "action-light-on",
+      "type": "haflow",
+      "position": {
+        "x": 680,
+        "y": 90
+      },
+      "data": {
+        "kind": "service",
+        "label": "Turn Light On",
+        "domain": "light",
+        "service": "turn_on",
+        "entityId": "light.example_light",
+        "entityIds": [
+          "light.example_light"
+        ],
+        "payload": "{\n  \"brightness_pct\": 65\n}"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge-motion-sun",
+      "source": "trigger-motion",
+      "target": "condition-sun",
+      "animated": true
+    },
+    {
+      "id": "edge-sun-light",
+      "source": "condition-sun",
+      "sourceHandle": "true",
+      "target": "action-light-on",
+      "animated": true
+    }
+  ],
+  "viewport": {
+    "x": 0,
+    "y": 0,
+    "zoom": 1
+  }
+}

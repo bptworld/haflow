@@ -27,6 +27,13 @@ Install HAFlow by adding the repository to Home Assistant:
 - Dark mode toggle in the toolbar
 - Live run log and node runtime status
 
+## Examples
+
+Importable example flows are included in [`examples/`](examples/):
+
+- `simple-motion-light.json`
+- `5-button-pico-example.json`
+
 ## Nodes
 
 - Trigger

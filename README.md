@@ -24,3 +24,10 @@ To install this app, follow these steps:
 The HAFlow app source is in [`haflow/`](haflow/).
 
 HAFlow runs inside Home Assistant and connects to Home Assistant Core automatically through the Supervisor API. No long-lived access token is required.
+
+## Examples
+
+Example importable flows are available in [`haflow/examples/`](haflow/examples/):
+
+- `simple-motion-light.json`
+- `5-button-pico-example.json`
