@@ -524,6 +524,10 @@ async function executeNode(node, options = {}) {
     return true
   }
 
+  if (data.kind === 'end') {
+    return true
+  }
+
   if (data.kind === 'service') {
     const payload = parsePayload(data.payload)
     const entityIds = data.entityIds ?? []

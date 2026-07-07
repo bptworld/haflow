@@ -169,6 +169,14 @@ const nodeCatalog = [
     data: { entityId: '', to: 'on', timeoutSeconds: 300, label: 'Wait' },
   },
   {
+    type: 'end',
+    label: 'End',
+    description: 'Ends a branch without running any action.',
+    icon: Check,
+    color: '#64748b',
+    data: { label: 'End' },
+  },
+  {
     type: 'service',
     label: 'Action',
     description: 'Runs a Home Assistant service, such as turning on one or more lights.',
@@ -361,7 +369,7 @@ function NodeBody({ data, selected }) {
           <Handle className="condition-handle condition-true" id="true" type="source" position={Position.Right} title="True" />
           <Handle className="condition-handle condition-false" id="false" type="source" position={Position.Right} title="False" />
         </>
-      ) : (
+      ) : data.kind === 'end' ? null : (
         <Handle type="source" position={Position.Right} />
       )}
     </div>
@@ -392,6 +400,7 @@ function summarizeNode(data) {
   if (data.kind === 'or') return 'Any incoming path continues'
   if (data.kind === 'delay') return `${data.seconds || 0}s`
   if (data.kind === 'wait') return data.entityId ? { name: entityName, status: entityState } : 'Choose an entity'
+  if (data.kind === 'end') return 'Branch stops here'
   if (data.kind === 'service') {
     if (data.actionEntities?.length) {
       return data.actionEntities.map((entity) => ({ name: entity.name, status: entity.statusLabel || formatEntityStatus(entity.state) }))

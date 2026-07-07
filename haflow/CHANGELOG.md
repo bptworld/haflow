@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.22
+
+- Add an End node that terminates a branch without running an action and resolves intentional `No outgoing link` warnings.
+
 ## 0.1.21
 
 - Display binary sensor states using Home Assistant device-class labels, such as door sensors showing `Open` and `Closed` while preserving raw `on` and `off` values for runner logic.
