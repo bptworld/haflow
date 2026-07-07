@@ -65,6 +65,7 @@ import './App.css'
 const ALL_ENTITY_AREAS = '__all_entity_areas__'
 const APP_VERSION = packageInfo.version
 const TARGETLESS_SERVICE_DOMAINS = new Set(['notify', 'persistent_notification'])
+const NODE_KINDS_REQUIRING_OUTGOING = new Set(['state', 'event', 'time', 'condition', 'or', 'delay', 'wait'])
 const BINARY_SENSOR_STATE_LABELS = {
   battery: { on: 'Low', off: 'Normal' },
   battery_charging: { on: 'Charging', off: 'Not Charging' },
@@ -615,7 +616,7 @@ function validateFlow(nodes, edges, entityById = new Map(), services = {}, isPau
     if (node.data?.kind === 'condition' && !incoming.get(node.id)) {
       issues.push(`${node.data?.label || node.id}: No incoming link`)
     }
-    if (['state', 'event', 'time', 'condition', 'or', 'delay', 'wait'].includes(node.data?.kind) && !outgoing.get(node.id)) {
+    if (NODE_KINDS_REQUIRING_OUTGOING.has(node.data?.kind) && !outgoing.get(node.id)) {
       issues.push(`${node.data?.label || node.id}: No outgoing link`)
     }
   }

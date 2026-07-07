@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.23
+
+- Make the outgoing-link validation rule explicit so action and terminal nodes can intentionally end a branch without warnings.
+
 ## 0.1.22
 
 - Add an End node that terminates a branch without running an action and resolves intentional `No outgoing link` warnings.
