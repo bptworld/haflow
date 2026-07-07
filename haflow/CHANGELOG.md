@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.27
+
+- Show human-readable action tile text such as `Turn on light` instead of raw Home Assistant service names like `Run light.turn_on`.
+
 ## 0.1.26
 
 - Tighten binary sensor state labels to match Home Assistant device-class meanings for motion, occupancy, presence, contact/opening, light, lock, and power sensors.

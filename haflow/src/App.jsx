@@ -405,7 +405,7 @@ function summarizeNode(data) {
   if (data.kind === 'wait') return data.entityId ? `Until ${formatAttributeName(data.attribute || 'state')} is ${formatStateOption(data.to || '', entity)}` : 'Choose an entity'
   if (data.kind === 'end') return 'Branch stops here'
   if (data.kind === 'service') {
-    const serviceIntent = data.domain && data.service ? `Run ${data.domain}.${data.service}` : 'Choose service'
+    const serviceIntent = formatServiceIntent(data.domain, data.service)
     if (data.actionEntities?.length) return [serviceIntent, formatTargetSummary(data.actionEntities)]
     return selectedCount ? [serviceIntent, `${selectedCount} targets`] : 'Choose entities'
   }
@@ -423,6 +423,48 @@ function formatTargetSummary(entities) {
   if (!entities.length) return 'No targets'
   if (entities.length === 1) return entities[0].name
   return `${entities.length} targets`
+}
+
+function formatServiceIntent(domain, service) {
+  if (!domain || !service) return 'Choose service'
+  const domainLabel = formatDomainName(domain)
+  const serviceLabels = {
+    turn_on: `Turn on ${domainLabel}`,
+    turn_off: `Turn off ${domainLabel}`,
+    toggle: `Toggle ${domainLabel}`,
+    open_cover: `Open ${domainLabel}`,
+    close_cover: `Close ${domainLabel}`,
+    stop_cover: `Stop ${domainLabel}`,
+    lock: `Lock ${domainLabel}`,
+    unlock: `Unlock ${domainLabel}`,
+    set_value: `Set ${domainLabel} value`,
+    set_temperature: `Set ${domainLabel} temperature`,
+    set_hvac_mode: `Set ${domainLabel} mode`,
+    create: `Create ${domainLabel}`,
+    dismiss: `Dismiss ${domainLabel}`,
+  }
+  return serviceLabels[service] || `${formatAttributeName(service)} ${domainLabel}`
+}
+
+function formatDomainName(domain) {
+  const labels = {
+    automation: 'automation',
+    binary_sensor: 'binary sensor',
+    climate: 'climate',
+    cover: 'cover',
+    fan: 'fan',
+    humidifier: 'humidifier',
+    input_boolean: 'helper',
+    light: 'light',
+    lock: 'lock',
+    media_player: 'media player',
+    notify: 'notification',
+    persistent_notification: 'notification',
+    scene: 'scene',
+    script: 'script',
+    switch: 'switch',
+  }
+  return labels[domain] || String(domain).replace(/_/g, ' ')
 }
 
 function formatTriggerIntent(rule, entity) {
