@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.21
+
+- Display binary sensor states using Home Assistant device-class labels, such as door sensors showing `Open` and `Closed` while preserving raw `on` and `off` values for runner logic.
+
 ## 0.1.20
 
 - Add an upper-left canvas device status panel showing every entity and device-only trigger used by the current flow in alphabetical order with live Home Assistant state where available.

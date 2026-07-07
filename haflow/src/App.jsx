@@ -65,6 +65,36 @@ import './App.css'
 const ALL_ENTITY_AREAS = '__all_entity_areas__'
 const APP_VERSION = packageInfo.version
 const TARGETLESS_SERVICE_DOMAINS = new Set(['notify', 'persistent_notification'])
+const BINARY_SENSOR_STATE_LABELS = {
+  battery: { on: 'Low', off: 'Normal' },
+  battery_charging: { on: 'Charging', off: 'Not Charging' },
+  carbon_monoxide: { on: 'Detected', off: 'Clear' },
+  cold: { on: 'Cold', off: 'Normal' },
+  connectivity: { on: 'Connected', off: 'Disconnected' },
+  door: { on: 'Open', off: 'Closed' },
+  garage_door: { on: 'Open', off: 'Closed' },
+  gas: { on: 'Detected', off: 'Clear' },
+  heat: { on: 'Hot', off: 'Normal' },
+  light: { on: 'Detected', off: 'Clear' },
+  lock: { on: 'Unlocked', off: 'Locked' },
+  moisture: { on: 'Wet', off: 'Dry' },
+  motion: { on: 'Detected', off: 'Clear' },
+  moving: { on: 'Moving', off: 'Stopped' },
+  occupancy: { on: 'Detected', off: 'Clear' },
+  opening: { on: 'Open', off: 'Closed' },
+  plug: { on: 'Plugged In', off: 'Unplugged' },
+  power: { on: 'Powered', off: 'No Power' },
+  presence: { on: 'Detected', off: 'Clear' },
+  problem: { on: 'Problem', off: 'OK' },
+  running: { on: 'Running', off: 'Not Running' },
+  safety: { on: 'Unsafe', off: 'Safe' },
+  smoke: { on: 'Detected', off: 'Clear' },
+  sound: { on: 'Detected', off: 'Clear' },
+  tamper: { on: 'Tampered', off: 'Clear' },
+  update: { on: 'Available', off: 'Up To Date' },
+  vibration: { on: 'Detected', off: 'Clear' },
+  window: { on: 'Open', off: 'Closed' },
+}
 const LUTRON_5_BUTTON_PICO_ROWS = [
   { label: 'Button 1 Top', number: 1 },
   { label: 'Button 2 Up', number: 2 },
@@ -343,7 +373,7 @@ const nodeTypes = { haflow: NodeBody }
 function summarizeNode(data) {
   const selectedCount = data.entityIds?.length ?? 0
   const entityName = formatEntityRef(data)
-  const entityState = formatEntityStatus(data.entityStatus)
+  const entityState = data.entityStatusLabel || formatEntityStatus(data.entityStatus)
   if (data.kind === 'state') {
     const rules = getStateTriggerRules(data)
     if (rules.length > 1) return `${rules.length} triggers`
@@ -364,7 +394,7 @@ function summarizeNode(data) {
   if (data.kind === 'wait') return data.entityId ? { name: entityName, status: entityState } : 'Choose an entity'
   if (data.kind === 'service') {
     if (data.actionEntities?.length) {
-      return data.actionEntities.map((entity) => ({ name: entity.name, status: formatEntityStatus(entity.state) }))
+      return data.actionEntities.map((entity) => ({ name: entity.name, status: entity.statusLabel || formatEntityStatus(entity.state) }))
     }
     return selectedCount ? `${selectedCount} devices selected` : 'Choose entities'
   }
@@ -378,9 +408,15 @@ function formatEntityRef(data) {
   return data.entityDisplayName || data.entityId || 'Entity'
 }
 
-function formatEntityStatus(value) {
+function formatEntityStatus(value, entity) {
   if (value === undefined || value === null || value === '') return 'Unknown'
-  return formatStateOption(value)
+  return formatStateOption(value, entity)
+}
+
+function getStateLabelMap(entity) {
+  if (entity?.domain !== 'binary_sensor') return null
+  const deviceClass = String(entity.attributes?.device_class || '').toLowerCase()
+  return BINARY_SENSOR_STATE_LABELS[deviceClass] || { on: 'On', off: 'Off' }
 }
 
 function getFlowEntityStatusClass(value) {
@@ -673,6 +709,7 @@ function enrichNodeDisplayData(data, entityById, runtimeState, now, forceSnapsho
       id: item.entity_id,
       name: item.friendlyName || item.entity_id,
       state: item.state,
+      statusLabel: formatEntityStatus(item.state, item),
     }))
 
   return {
@@ -680,6 +717,7 @@ function enrichNodeDisplayData(data, entityById, runtimeState, now, forceSnapsho
     actionEntities,
     entityDisplayName: entity?.friendlyName || data?.entityId,
     entityStatus: entity?.state,
+    entityStatusLabel: formatEntityStatus(entity?.state, entity),
     delayRemainingMs,
     lastExecutedAt: runtimeState?.lastExecutedAt,
     runtimeStatus: getVisibleRuntimeStatus(runtimeState, now, forceSnapshot),
@@ -900,6 +938,7 @@ function FlowWorkspace() {
         entityId,
         name: entity?.friendlyName || entityId,
         state: isDevice ? 'device' : entity?.state ?? 'unavailable',
+        stateLabel: isDevice ? 'Device' : formatEntityStatus(entity?.state ?? 'unavailable', entity),
       }
     })
     .sort((first, second) => first.name.localeCompare(second.name) || first.entityId.localeCompare(second.entityId)), [entityById, nodes])
@@ -1987,7 +2026,7 @@ function FlowWorkspace() {
                 {flowDeviceStatuses.map((item) => (
                   <div className="flow-device-status-item" key={item.entityId} title={item.entityId}>
                     <span>{item.name}</span>
-                    <strong className={getFlowEntityStatusClass(item.state)}>{formatEntityStatus(item.state)}</strong>
+                    <strong className={getFlowEntityStatusClass(item.state)}>{item.stateLabel}</strong>
                   </div>
                 ))}
               </div>
@@ -2140,8 +2179,8 @@ function SelectedEntityChip({ entity, entityId, onRemove }) {
   )
 }
 
-function ValueSelect({ options, placeholder, value, onChange }) {
-  const normalizedOptions = normalizeControlOptions(options)
+function ValueSelect({ entity, options, placeholder, value, onChange }) {
+  const normalizedOptions = normalizeControlOptions(options, entity)
   const currentValue = formatAttributeInput(value)
   const hasCurrentValue = currentValue && !normalizedOptions.some((option) => option.value === currentValue)
 
@@ -2152,7 +2191,7 @@ function ValueSelect({ options, placeholder, value, onChange }) {
   return (
     <select onChange={(event) => onChange(event.target.value)} value={currentValue}>
       <option value="">{placeholder}</option>
-      {hasCurrentValue && <option value={currentValue}>{formatStateOption(currentValue)}</option>}
+      {hasCurrentValue && <option value={currentValue}>{formatStateOption(currentValue, entity)}</option>}
       {normalizedOptions.map((option) => (
         <option key={option.value} value={option.value}>{option.label}</option>
       ))}
@@ -2160,14 +2199,14 @@ function ValueSelect({ options, placeholder, value, onChange }) {
   )
 }
 
-function StateValueSelect({ options, placeholder, value, onChange }) {
+function StateValueSelect({ entity, options, placeholder, value, onChange }) {
   const cleanOptions = options.filter((option) => option !== ANY_CHANGE)
   return (
     <select onChange={(event) => onChange(event.target.value)} value={value ?? ''}>
       <option value="">{placeholder}</option>
       <option value={ANY_CHANGE}>Changed</option>
       {cleanOptions.map((option) => (
-        <option key={option} value={option}>{formatStateOption(option)}</option>
+        <option key={option} value={option}>{formatStateOption(option, entity)}</option>
       ))}
     </select>
   )
@@ -2185,8 +2224,8 @@ function Inspector({ entities, node, services, updateNodeData }) {
   const compareTargetOptions = useMemo(() => ['state', ...selectedEntityAttributes.map((attribute) => attribute.key)], [selectedEntityAttributes])
   const compareValueOptions = useMemo(() => {
     const selectedAttribute = selectedEntityAttributes.find((attribute) => attribute.key === data.attribute)
-    return getAttributeValueOptions(selectedAttribute, stateOptions, data.value, data.to)
-  }, [data.attribute, data.to, data.value, selectedEntityAttributes, stateOptions])
+    return getAttributeValueOptions(selectedAttribute, stateOptions, selectedEntity, data.value, data.to)
+  }, [data.attribute, data.to, data.value, selectedEntity, selectedEntityAttributes, stateOptions])
   const nodeStateOptions = useMemo(() => {
     return Array.from(new Set([...stateOptions, data.from, data.to].filter(Boolean)))
   }, [data.from, data.to, stateOptions])
@@ -2302,8 +2341,8 @@ function Inspector({ entities, node, services, updateNodeData }) {
               <label>Entity (choose from list or search and select from Entities below)<EntityInput entities={entities} onChange={updateEntity} placeholder="Select entity" value={data.entityId} /></label>
               <SelectedEntityChip entity={selectedEntity} entityId={data.entityId} onRemove={clearEntity} />
               <div className="field-grid">
-                <label>From<StateValueSelect onChange={(from) => updateNodeData({ from })} options={nodeStateOptions} placeholder="optional" value={data.from} /></label>
-                <label>To<StateValueSelect onChange={(to) => updateNodeData({ to })} options={nodeStateOptions} placeholder="optional" value={data.to} /></label>
+                <label>From<StateValueSelect entity={selectedEntity} onChange={(from) => updateNodeData({ from })} options={nodeStateOptions} placeholder="optional" value={data.from} /></label>
+                <label>To<StateValueSelect entity={selectedEntity} onChange={(to) => updateNodeData({ to })} options={nodeStateOptions} placeholder="optional" value={data.to} /></label>
               </div>
             </>
           )}
@@ -2327,7 +2366,7 @@ function Inspector({ entities, node, services, updateNodeData }) {
             </select>
           </label>
           <div className="field-grid">
-          <label>Until<ValueSelect onChange={(to) => updateNodeData({ to })} options={compareValueOptions} placeholder="Select value" value={data.to} /></label>
+          <label>Until<ValueSelect entity={(data.attribute ?? 'state') === 'state' ? selectedEntity : undefined} onChange={(to) => updateNodeData({ to })} options={compareValueOptions} placeholder="Select value" value={data.to} /></label>
           <label>Timeout<input min="0" value={data.timeoutSeconds ?? 300} onChange={(event) => updateNodeData({ timeoutSeconds: Number(event.target.value) })} type="number" /></label>
         </div>
         </>
@@ -2364,19 +2403,23 @@ function Inspector({ entities, node, services, updateNodeData }) {
   )
 }
 
-function formatStateOption(option) {
+function formatStateOption(option, entity) {
   if (option === ANY_CHANGE) return 'Changed'
+  const rawValue = String(option)
+  const stateLabels = getStateLabelMap(entity)
+  const mappedLabel = stateLabels?.[rawValue.toLowerCase()]
+  if (mappedLabel) return mappedLabel
   return String(option).replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
 }
 
-function normalizeControlOptions(options) {
+function normalizeControlOptions(options, entity) {
   return options.map((option) => {
     if (option && typeof option === 'object' && 'value' in option) {
       const value = formatAttributeInput(option.value)
-      return { value, label: option.label ?? formatStateOption(value) }
+      return { value, label: option.label ?? formatStateOption(value, entity) }
     }
     const value = formatAttributeInput(option)
-    return { value, label: formatStateOption(value) }
+    return { value, label: formatStateOption(value, entity) }
   })
 }
 
@@ -2482,8 +2525,8 @@ function StateTriggerRulesEditor({ data, entities, updateNodeData }) {
               onRemove={() => updateRule(index, { entityId: '', deviceId: '', from: '', to: '' })}
             />
             <div className="trigger-rule-values">
-              <label>From<StateValueSelect onChange={(from) => updateRule(index, { from })} options={stateOptions} placeholder="optional" value={rule.from} /></label>
-              <label>To<StateValueSelect onChange={(to) => updateRule(index, { to })} options={stateOptions} placeholder="optional" value={rule.to} /></label>
+              <label>From<StateValueSelect entity={entity} onChange={(from) => updateRule(index, { from })} options={stateOptions} placeholder="optional" value={rule.from} /></label>
+              <label>To<StateValueSelect entity={entity} onChange={(to) => updateRule(index, { to })} options={stateOptions} placeholder="optional" value={rule.to} /></label>
               {editableRules.length > 1 && (
                 <button className="condition-rule-remove icon-only" onClick={() => removeRule(index)} title="Remove trigger" type="button">
                   <X size={16} />
@@ -2595,7 +2638,7 @@ function ConditionRulesEditor({ data, entities, updateNodeData }) {
         const attributes = ['state', ...entityAttributes.map((attribute) => attribute.key)]
         const selectedAttribute = entityAttributes.find((attribute) => attribute.key === rule.attribute)
         const stateOptions = ruleStateOptions[rule.entityId] ?? entity?.valueOptions ?? []
-        const valueOptions = getAttributeValueOptions(selectedAttribute, stateOptions, rule.value)
+        const valueOptions = getAttributeValueOptions(selectedAttribute, stateOptions, entity, rule.value)
 
         return (
           <div className="condition-rule" key={rule.id ?? `${rule.entityId}-${index}`}>
@@ -2631,7 +2674,7 @@ function ConditionRulesEditor({ data, entities, updateNodeData }) {
               </label>
               <label>
                 Value
-                <ValueSelect onChange={(value) => updateRule(index, { value })} options={valueOptions} placeholder="Select value" value={rule.value} />
+                <ValueSelect entity={(rule.attribute ?? 'state') === 'state' ? entity : undefined} onChange={(value) => updateRule(index, { value })} options={valueOptions} placeholder="Select value" value={rule.value} />
               </label>
             </div>
           </div>
@@ -2754,11 +2797,11 @@ function getEntityAttributes(entity) {
     .map(([key]) => buildAttributeDescriptor(key, [entity]))
 }
 
-function getAttributeValueOptions(attribute, stateOptions, ...currentValues) {
+function getAttributeValueOptions(attribute, stateOptions, entity, ...currentValues) {
   if (!attribute || attribute.key === 'state') {
     return Array.from(new Set([...stateOptions, ...currentValues].filter(Boolean))).map((value) => ({
       value,
-      label: formatStateOption(value),
+      label: formatStateOption(value, entity),
     }))
   }
 
