@@ -108,7 +108,13 @@ body,
   gap: 7px;
 }
 
-.flow-library-actions button {
+.library-actions {
+  display: grid;
+  gap: 7px;
+}
+
+.flow-library-actions button,
+.library-actions button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -123,12 +129,14 @@ body,
   font-weight: 800;
 }
 
-.flow-library-actions button:hover:not(:disabled) {
+.flow-library-actions button:hover:not(:disabled),
+.library-actions button:hover:not(:disabled) {
   border-color: #94a3b8;
   background: #f8fafc;
 }
 
-.flow-library-actions button:disabled {
+.flow-library-actions button:disabled,
+.library-actions button:disabled {
   cursor: default;
   opacity: 0.45;
 }
@@ -1045,6 +1053,11 @@ textarea:focus {
   font-size: 13px;
 }
 
+.empty-state.compact {
+  min-height: 88px;
+  padding: 12px;
+}
+
 .validation-list {
   display: grid;
   align-content: start;
@@ -1072,6 +1085,52 @@ textarea:focus {
 .validation-ok {
   color: #0f766e;
   background: #ecfdf5;
+}
+
+.run-history-list {
+  display: grid;
+  gap: 8px;
+}
+
+.run-history-item {
+  display: grid;
+  gap: 5px;
+  padding: 10px;
+  background: #ffffff;
+  border: 1px solid #d8e0e8;
+  border-left: 4px solid #0f766e;
+  border-radius: 7px;
+}
+
+.run-history-item.failed {
+  border-left-color: #e11d48;
+}
+
+.run-history-item.cancelled {
+  border-left-color: #d97706;
+}
+
+.run-history-item div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.run-history-item strong {
+  font-size: 12px;
+}
+
+.run-history-item span,
+.run-history-item small {
+  color: #64748b;
+  font-size: 11px;
+}
+
+.run-history-item p {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .search-box {
@@ -1355,6 +1414,8 @@ textarea:focus {
 .theme-dark .node-meta,
 .theme-dark .ha-stats,
 .theme-dark .log-line span,
+.theme-dark .run-history-item span,
+.theme-dark .run-history-item small,
 .theme-dark .selected-entities p,
 .theme-dark .selected-entities small,
 .theme-dark .entity-list span,
@@ -1380,9 +1441,11 @@ textarea:focus {
 .theme-dark textarea,
 .theme-dark .palette-item,
 .theme-dark .flow-library-actions button,
+.theme-dark .library-actions button,
 .theme-dark .secondary-action,
 .theme-dark .managed-connection,
 .theme-dark .runner-card,
+.theme-dark .run-history-item,
 .theme-dark .toolbar-actions button,
 .theme-dark .toolbar-align-row button,
 .theme-dark .tabs button,
@@ -1419,6 +1482,7 @@ textarea:focus {
 .theme-dark .tabs button:hover,
 .theme-dark .inspector-reopen:hover,
 .theme-dark .flow-library-actions button:hover:not(:disabled),
+.theme-dark .library-actions button:hover:not(:disabled),
 .theme-dark .secondary-action:hover:not(:disabled),
 .theme-dark .section-title-row button:hover {
   color: #f8fafc;

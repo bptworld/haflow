@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.10
+
+- Add whole-library backup export and import for all saved flows.
+- Add persistent run history with trigger, outcome, duration, and nodes touched.
+- Add a toolbar action to run from the selected node.
+- Add stronger validation for paused flows, missing triggers, stale entities, invalid services, and missing targets.
+- Add a Starter flow pack with prefixed sample flows.
+
 ## 0.1.9
 
 - Show the latest flow trigger time in the toolbar summary.

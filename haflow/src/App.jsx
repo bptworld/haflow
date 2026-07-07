@@ -45,6 +45,7 @@ import {
   Search,
   Settings,
   Split,
+  SquarePlay,
   Sun,
   Timer,
   Hourglass,
@@ -61,6 +62,7 @@ import './App.css'
 
 const ALL_ENTITY_AREAS = '__all_entity_areas__'
 const APP_VERSION = packageInfo.version
+const TARGETLESS_SERVICE_DOMAINS = new Set(['notify', 'persistent_notification'])
 const LUTRON_5_BUTTON_PICO_ROWS = [
   { label: 'Button 1 Top', number: 1 },
   { label: 'Button 2 Up', number: 2 },
@@ -447,21 +449,30 @@ function formatDuration(milliseconds) {
   return `${minutes}:${String(seconds).padStart(2, '0')}`
 }
 
-function validateNodeData(data) {
+function validateNodeData(data, entityById = new Map(), services = {}) {
   if (data.disabled) return ''
+  const hasEntityCatalog = entityById.size > 0
+  const entityExists = (entityId) => !entityId || !hasEntityCatalog || entityById.has(entityId)
   if (data.kind === 'state') {
     const rules = getStateTriggerRules(data)
     if (!rules.length || rules.some((rule) => !rule.entityId && !rule.deviceId)) return 'Missing entity'
+    if (rules.some((rule) => rule.entityId && !entityExists(rule.entityId))) return 'Entity not found'
   }
+  if (data.kind === 'event' && data.entityId && !entityExists(data.entityId)) return 'Entity not found'
   if (data.kind === 'time' && !data.at) return 'Missing time'
   if (data.kind === 'condition') {
     const rules = getConditionRules(data)
     if (!rules.length || rules.some((rule) => !rule.entityId)) return 'Missing entity'
+    if (rules.some((rule) => rule.entityId && !entityExists(rule.entityId))) return 'Entity not found'
     if (rules.some((rule) => !rule.value && rule.operator !== 'exists')) return 'Missing value'
   }
   if (data.kind === 'wait' && !data.entityId) return 'Missing entity'
+  if (data.kind === 'wait' && data.entityId && !entityExists(data.entityId)) return 'Entity not found'
   if (data.kind === 'service') {
     if (!data.domain || !data.service) return 'Missing service'
+    if (services[data.domain] && !services[data.domain][data.service]) return 'Service not found'
+    const entityIds = data.entityIds?.length ? data.entityIds : (data.entityId ? [data.entityId] : [])
+    if (entityIds.some((entityId) => !entityExists(entityId))) return 'Entity not found'
     if (data.payload && String(data.payload).trim()) {
       try {
         JSON.parse(data.payload)
@@ -471,18 +482,33 @@ function validateNodeData(data) {
     }
   }
   if (data.kind === 'scene' && !data.entityId) return 'Missing scene'
+  if (data.kind === 'scene' && data.entityId && !entityExists(data.entityId)) return 'Scene not found'
   return ''
 }
 
-function validateFlow(nodes, edges) {
+function validateFlow(nodes, edges, entityById = new Map(), services = {}, isPaused = false) {
   const issues = []
   const outgoing = new Map(nodes.map((node) => [node.id, 0]))
+  const incoming = new Map(nodes.map((node) => [node.id, 0]))
   edges.forEach((edge) => outgoing.set(edge.source, (outgoing.get(edge.source) ?? 0) + 1))
+  edges.forEach((edge) => incoming.set(edge.target, (incoming.get(edge.target) ?? 0) + 1))
+
+  if (isPaused) issues.push('Flow is paused')
+  if (!nodes.some((node) => !node.data?.disabled && ['state', 'event', 'time'].includes(node.data?.kind))) {
+    issues.push('No active trigger node')
+  }
 
   for (const node of nodes) {
     if (node.data?.disabled) continue
-    const nodeIssue = validateNodeData(node.data ?? {})
+    const nodeIssue = validateNodeData(node.data ?? {}, entityById, services)
     if (nodeIssue) issues.push(`${node.data?.label || node.id}: ${nodeIssue}`)
+    if (node.data?.kind === 'service') {
+      const entityIds = node.data.entityIds?.length ? node.data.entityIds : (node.data.entityId ? [node.data.entityId] : [])
+      if (!entityIds.length && !TARGETLESS_SERVICE_DOMAINS.has(node.data.domain) && !String(node.data.payload || '').includes('entity_id')) issues.push(`${node.data?.label || node.id}: No target entity`)
+    }
+    if (node.data?.kind === 'condition' && !incoming.get(node.id)) {
+      issues.push(`${node.data?.label || node.id}: No incoming link`)
+    }
     if (['state', 'event', 'time', 'condition', 'or', 'delay', 'wait'].includes(node.data?.kind) && !outgoing.get(node.id)) {
       issues.push(`${node.data?.label || node.id}: No outgoing link`)
     }
@@ -752,6 +778,7 @@ function normalizeViewport(viewport) {
 function FlowWorkspace() {
   const wrapperRef = useRef(null)
   const importRef = useRef(null)
+  const backupImportRef = useRef(null)
   const saveFlowRef = useRef(null)
   const runFlowRef = useRef(null)
   const viewportRef = useRef(defaultViewport)
@@ -769,6 +796,7 @@ function FlowWorkspace() {
   const [entities, setEntities] = useState([])
   const [services, setServices] = useState({})
   const [logs, setLogs] = useState([])
+  const [runHistory, setRunHistory] = useState([])
   const [query, setQuery] = useState('')
   const [runner, setRunner] = useState({ enabled: false, connected: false, running: 0, triggerCount: 0 })
   const [nodeRuntime, setNodeRuntime] = useState({})
@@ -833,7 +861,7 @@ function FlowWorkspace() {
       animated: edge.animated && !isRuntimeEdge,
     }
   }), [edges, isInLastRunSnapshot, nodeRuntime, runtimeClock])
-  const validationIssues = useMemo(() => validateFlow(nodes, edges), [nodes, edges])
+  const validationIssues = useMemo(() => validateFlow(nodes, edges, entityById, services, activeFlow?.paused), [activeFlow?.paused, edges, entityById, nodes, services])
   const flowSnapshot = useMemo(() => JSON.stringify({ nodes, edges }), [edges, nodes])
   const groupedEntities = useMemo(() => {
     const normalized = query.trim().toLowerCase()
@@ -912,7 +940,8 @@ function FlowWorkspace() {
       apiFetch('/api/logs').then((res) => res.json()),
       apiFetch('/api/runner').then((res) => res.json()),
       apiFetch('/api/flows').then((res) => res.json()),
-    ]).then(async ([config, existingLogs, runnerStatus, flowList]) => {
+      apiFetch('/api/run-history').then((res) => res.json()),
+    ]).then(async ([config, existingLogs, runnerStatus, flowList, existingHistory]) => {
       const nextActiveFlowId = flowList.activeFlowId ?? 'default'
       const flow = await apiFetch(`/api/flows/${nextActiveFlowId}`).then((res) => res.json())
       setConnection(config)
@@ -937,6 +966,7 @@ function FlowWorkspace() {
       setSaveStatus('saved')
       setHasLoadedFlow(true)
       setLogs(existingLogs.logs ?? [])
+      setRunHistory(existingHistory.history ?? [])
     }).catch(() => {
       setLogs((current) => [{ time: new Date().toISOString(), level: 'warn', message: 'Backend is not reachable yet.' }, ...current])
     })
@@ -1000,6 +1030,7 @@ function FlowWorkspace() {
       if (payload.type === 'logs-cleared') setLogs([])
       if (payload.type === 'status') setConnection((current) => ({ ...current, ...payload.status }))
       if (payload.type === 'runner') setRunner(payload.runner)
+      if (payload.type === 'run-history') setRunHistory(payload.history ?? [])
       if (payload.type === 'entity-state') {
         setEntities((current) => mergeEntityStateUpdate(current, payload.entity))
       }
@@ -1418,6 +1449,52 @@ function FlowWorkspace() {
     URL.revokeObjectURL(url)
   }
 
+  const exportBackup = async () => {
+    const response = await apiFetch('/api/backup')
+    const backup = await response.json()
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `haflow-backup-${new Date().toISOString().slice(0, 10)}.json`
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const importBackup = async (event) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+
+    try {
+      const backup = JSON.parse(await file.text())
+      const response = await apiFetch('/api/backup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(backup),
+      })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.error || 'Backup import failed.')
+      setFlows(result.flows ?? [])
+      if (result.importedIds?.[0]) await loadFlow(result.importedIds[0])
+      setLogs((current) => [{ time: new Date().toISOString(), level: 'info', message: `Imported ${result.importedIds?.length ?? 0} backup flow${result.importedIds?.length === 1 ? '' : 's'}.` }, ...current])
+    } catch (error) {
+      setLogs((current) => [{ time: new Date().toISOString(), level: 'error', message: error.message }, ...current])
+    }
+  }
+
+  const addStarterPack = async () => {
+    const response = await apiFetch('/api/starter-pack', { method: 'POST' })
+    const result = await response.json()
+    if (!response.ok) {
+      setLogs((current) => [{ time: new Date().toISOString(), level: 'error', message: result.error || 'Starter pack import failed.' }, ...current])
+      return
+    }
+    setFlows(result.flows ?? [])
+    if (result.importedIds?.[0]) await loadFlow(result.importedIds[0])
+    setLogs((current) => [{ time: new Date().toISOString(), level: 'info', message: `Added ${result.importedIds?.length ?? 0} Starter flows.` }, ...current])
+  }
+
   const importFlow = async (event) => {
     const file = event.target.files?.[0]
     event.target.value = ''
@@ -1442,13 +1519,24 @@ function FlowWorkspace() {
     }
   }
 
-  const runFlow = async () => {
+  const runFlow = async ({ fromSelected = false } = {}) => {
     if (activeFlow?.paused) {
       setLogs((current) => [{ time: new Date().toISOString(), level: 'warn', message: `${activeFlow.name} is paused. Resume it before running.` }, ...current])
       return
     }
 
-    if (validationIssues.length) {
+    if (fromSelected && !selectedId) {
+      setLogs((current) => [{ time: new Date().toISOString(), level: 'warn', message: 'Select a node before running from selected.' }, ...current])
+      return
+    }
+
+    const selectedNodeIssue = fromSelected ? validateNodeData(selectedNode?.data ?? {}, entityById, services) : ''
+    if (selectedNodeIssue) {
+      setLogs((current) => [{ time: new Date().toISOString(), level: 'warn', message: `${selectedNode?.data?.label || selectedId}: ${selectedNodeIssue}` }, ...current])
+      return
+    }
+
+    if (!fromSelected && validationIssues.length) {
       setLogs((current) => [{ time: new Date().toISOString(), level: 'warn', message: `Fix ${validationIssues.length} validation issue${validationIssues.length === 1 ? '' : 's'} before running.` }, ...current])
       return
     }
@@ -1457,7 +1545,7 @@ function FlowWorkspace() {
     const response = await apiFetch('/api/run', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ nodes, edges, startNodeId: selectedId }),
+      body: JSON.stringify({ nodes, edges, startNodeId: fromSelected ? selectedId : '' }),
     })
     const result = await response.json()
     setLogs((current) => [{ time: new Date().toISOString(), level: result.ok ? 'info' : 'error', message: result.message }, ...current])
@@ -1637,6 +1725,12 @@ function FlowWorkspace() {
             <button className="delete-flow" disabled={activeFlowId === 'default'} onClick={deleteFlow} title="Delete flow" type="button"><Trash2 size={16} /></button>
           </div>
         </div>
+        <div className="section-title">Library</div>
+        <div className="library-actions">
+          <button onClick={addStarterPack} title="Add starter flows" type="button"><FilePlus size={16} /> Starter Pack</button>
+          <button onClick={exportBackup} title="Export all flows" type="button"><Download size={16} /> Export Backup</button>
+          <button onClick={() => backupImportRef.current?.click()} title="Import all-flow backup" type="button"><Upload size={16} /> Import Backup</button>
+        </div>
         <div className="section-title">Nodes</div>
         <div className="node-palette">
           {nodeCatalog.map((item) => {
@@ -1701,7 +1795,8 @@ function FlowWorkspace() {
               <button onClick={undoFlow} disabled={!historyState.canUndo} title="Undo" type="button"><Undo2 size={18} /></button>
               <button onClick={redoFlow} disabled={!historyState.canRedo} title="Redo" type="button"><Redo2 size={18} /></button>
               <button onClick={saveFlow} title="Save flow" type="button"><Save size={18} /></button>
-              <button onClick={runFlow} title="Run flow" type="button"><Play size={18} /></button>
+              <button onClick={() => runFlow()} title="Run full flow" type="button"><Play size={18} /></button>
+              <button onClick={() => runFlow({ fromSelected: true })} disabled={!selectedId} title="Run from selected node" type="button"><SquarePlay size={18} /></button>
               <button onClick={() => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))} title={`Switch to ${isDarkTheme ? 'light' : 'dark'} mode`} type="button">
                 {isDarkTheme ? <Sun size={18} /> : <Moon size={18} />}
               </button>
@@ -1725,6 +1820,7 @@ function FlowWorkspace() {
             </div>
           ) : null}
           <input accept="application/json" className="hidden-input" onChange={importFlow} ref={importRef} type="file" />
+          <input accept="application/json" className="hidden-input" onChange={importBackup} ref={backupImportRef} type="file" />
         </header>
         <div className="flow-surface" onDragOver={(event) => event.preventDefault()} onDrop={onDrop}>
           <ReactFlow
@@ -1805,6 +1901,19 @@ function FlowWorkspace() {
             {validationIssues.length ? validationIssues.slice(0, 8).map((issue, index) => (
               <div className="validation-item" key={`${issue}-${index}`}><AlertTriangle size={14} /> {issue}</div>
             )) : <div className="validation-ok"><Check size={14} /> Flow looks ready</div>}
+          </div>
+          <div className="section-title">Run History</div>
+          <div className="run-history-list">
+            {runHistory.length ? runHistory.slice(0, 10).map((entry) => (
+              <div className={`run-history-item ${entry.status}`} key={entry.id}>
+                <div>
+                  <strong>{entry.status === 'completed' ? 'Completed' : entry.status === 'cancelled' ? 'Cancelled' : 'Failed'}</strong>
+                  <span>{formatNodeRunTime(entry.startedAt)} · {formatDuration(entry.durationMs)}</span>
+                </div>
+                <p>{entry.trigger}</p>
+                <small>{entry.nodes?.length ? `${entry.nodes.length} node${entry.nodes.length === 1 ? '' : 's'} touched` : 'No nodes touched'}{entry.message ? ` · ${entry.message}` : ''}</small>
+              </div>
+            )) : <div className="empty-state compact"><History size={24} /><p>No runs yet.</p></div>}
           </div>
           <div className="section-title">Entities</div>
           <div className="search-box">

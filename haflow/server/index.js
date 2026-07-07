@@ -14,6 +14,8 @@ const flowsDir = path.join(dataDir, 'flows')
 const flowIndexPath = path.join(flowsDir, 'index.json')
 const logPath = path.join(dataDir, 'logs.json')
 const runtimePath = path.join(dataDir, 'node-runtime.json')
+const runHistoryPath = path.join(dataDir, 'run-history.json')
+const examplesDir = path.join(__dirname, '..', 'examples')
 const app = express()
 const port = Number(process.env.PORT ?? 4177)
 const supervisorToken = process.env.SUPERVISOR_TOKEN || ''
@@ -28,6 +30,8 @@ let lastTimeKey = ''
 let runningTriggers = new Map()
 let manualRun = null
 let nodeRuntime = new Map()
+let runHistory = []
+let activeRunEvents = new Map()
 let cachedFlow = { nodes: [], edges: [] }
 let cachedFlowMeta = { id: 'default', name: 'Default Flow', paused: false }
 let waiters = []
@@ -35,13 +39,14 @@ let deviceRegistryById = new Map()
 const ANY_CHANGE = '__changed__'
 const LUTRON_5_BUTTON_PICO_BUTTONS = [1, 2, 5, 3, 4]
 
-app.use(express.json({ limit: '2mb' }))
+app.use(express.json({ limit: '10mb' }))
 
 await fs.mkdir(dataDir, { recursive: true })
 await fs.mkdir(flowsDir, { recursive: true })
 config = { ...config, ...(await readJson(configPath, config)) }
 logs = await readJson(logPath, [])
 nodeRuntime = new Map(Object.entries(await readJson(runtimePath, {})))
+runHistory = normalizeRunHistory(await readJson(runHistoryPath, []))
 await initializeFlowLibrary()
 cachedFlow = await readFlow(config.activeFlowId ?? 'default')
 cachedFlowMeta = await readFlowMeta(config.activeFlowId ?? 'default')
@@ -219,8 +224,76 @@ app.delete('/api/flows/:flowId', async (req, res) => {
   res.json({ flows: await readFlowIndex(), activeFlowId: config.activeFlowId ?? 'default' })
 })
 
+app.get('/api/backup', async (_, res) => {
+  const flows = await readFlowIndex()
+  const backupFlows = await Promise.all(flows.map(async (meta) => ({
+    meta,
+    flow: await readFlow(meta.id),
+  })))
+  res.json({
+    app: 'HAFlow',
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    activeFlowId: config.activeFlowId ?? 'default',
+    flows: backupFlows,
+  })
+})
+
+app.post('/api/backup', async (req, res) => {
+  const importedFlows = Array.isArray(req.body?.flows) ? req.body.flows : []
+  if (!importedFlows.length) return res.status(400).json({ error: 'Backup JSON does not contain any flows.' })
+
+  const existingFlows = await readFlowIndex()
+  const nextFlows = [...existingFlows]
+  const importedIds = []
+  for (const item of importedFlows) {
+    const sourceMeta = item.meta ?? item
+    const sourceFlow = item.flow ?? item
+    const name = String(sourceMeta?.name || sourceFlow?.name || 'Imported Flow')
+    const baseId = safeFlowId(sourceMeta?.id) || slugifyFlowId(name)
+    const id = ensureUniqueFlowId(baseId, nextFlows)
+    const meta = normalizeFlowMeta({
+      ...sourceMeta,
+      id,
+      name,
+      createdAt: sourceMeta?.createdAt || new Date().toISOString(),
+    })
+    await writeFlow(id, sourceFlow)
+    nextFlows.push(meta)
+    importedIds.push(id)
+  }
+
+  await writeFlowIndex(nextFlows)
+  log('info', `Imported ${importedIds.length} flow${importedIds.length === 1 ? '' : 's'} from backup.`)
+  broadcastRunner()
+  res.json({ flows: await readFlowIndex(), activeFlowId: config.activeFlowId ?? 'default', importedIds })
+})
+
+app.post('/api/starter-pack', async (_, res) => {
+  const starterFlows = await getStarterPackFlows()
+  const existingFlows = await readFlowIndex()
+  const nextFlows = [...existingFlows]
+  const importedIds = []
+
+  for (const item of starterFlows) {
+    const id = ensureUniqueFlowId(slugifyFlowId(item.name), nextFlows)
+    const meta = normalizeFlowMeta({ id, name: item.name, createdAt: new Date().toISOString() })
+    await writeFlow(id, item.flow)
+    nextFlows.push(meta)
+    importedIds.push(id)
+  }
+
+  await writeFlowIndex(nextFlows)
+  log('info', `Added ${importedIds.length} starter flow${importedIds.length === 1 ? '' : 's'}.`)
+  res.json({ flows: await readFlowIndex(), activeFlowId: config.activeFlowId ?? 'default', importedIds })
+})
+
 app.get('/api/logs', (_, res) => {
   res.json({ logs })
+})
+
+app.get('/api/run-history', (_, res) => {
+  res.json({ history: runHistory })
 })
 
 app.delete('/api/logs', async (_, res) => {
@@ -268,17 +341,41 @@ app.post('/api/run', async (req, res) => {
 
   const run = { id: crypto.randomUUID(), controller: new AbortController() }
   manualRun = run
+  beginRunHistory(run.id)
   broadcastRunner()
+  const startedAt = new Date().toISOString()
+  const startNode = (req.body.nodes ?? []).find((node) => node.id === req.body.startNodeId)
   try {
     const flow = { nodes: req.body.nodes ?? [], edges: req.body.edges ?? [] }
     const result = await runFlow(flow, req.body.startNodeId, { runId: run.id, signal: run.controller.signal })
+    await finishRunHistory({
+      id: run.id,
+      startedAt,
+      trigger: req.body.startNodeId ? `Manual from ${startNode?.data?.label || req.body.startNodeId}` : 'Manual run',
+      status: 'completed',
+      message: result,
+    })
     res.json({ ok: true, message: result })
   } catch (error) {
     if (isCancelledError(error)) {
+      await finishRunHistory({
+        id: run.id,
+        startedAt,
+        trigger: req.body.startNodeId ? `Manual from ${startNode?.data?.label || req.body.startNodeId}` : 'Manual run',
+        status: 'cancelled',
+        message: 'Previous run cancelled.',
+      })
       res.json({ ok: true, message: 'Previous run cancelled.' })
       return
     }
     log('error', error.message)
+    await finishRunHistory({
+      id: run.id,
+      startedAt,
+      trigger: req.body.startNodeId ? `Manual from ${startNode?.data?.label || req.body.startNodeId}` : 'Manual run',
+      status: 'failed',
+      message: error.message,
+    })
     res.status(400).json({ ok: false, message: error.message })
   } finally {
     if (manualRun?.id === run.id) manualRun = null
@@ -314,6 +411,7 @@ wss.on('connection', (socket) => {
   socket.send(JSON.stringify({ type: 'status', status: publicConfig(false) }))
   socket.send(JSON.stringify({ type: 'runner', runner: getRunnerStatus() }))
   socket.send(JSON.stringify({ type: 'node-runtime', runtime: getNodeRuntimeSnapshot() }))
+  socket.send(JSON.stringify({ type: 'run-history', history: runHistory }))
   socket.on('close', () => clients.delete(socket))
 })
 
@@ -534,13 +632,39 @@ async function triggerNode(node, { reason }) {
 
   const run = { id: crypto.randomUUID(), controller: new AbortController() }
   runningTriggers.set(node.id, run)
+  beginRunHistory(run.id)
   broadcastRunner()
+  const startedAt = new Date().toISOString()
   try {
     log('info', `${node.data?.label || node.id} triggered by ${reason}.`)
-    await runFlow(cachedFlow, node.id, { runId: run.id, skipStartExecution: node.id, signal: run.controller.signal })
+    const result = await runFlow(cachedFlow, node.id, { runId: run.id, skipStartExecution: node.id, signal: run.controller.signal })
+    await finishRunHistory({
+      id: run.id,
+      startedAt,
+      trigger: `${node.data?.label || node.id} by ${reason}`,
+      status: 'completed',
+      message: result,
+    })
   } catch (error) {
-    if (isCancelledError(error)) log('info', `${node.data?.label || node.id} previous run stopped.`)
-    else throw error
+    if (isCancelledError(error)) {
+      log('info', `${node.data?.label || node.id} previous run stopped.`)
+      await finishRunHistory({
+        id: run.id,
+        startedAt,
+        trigger: `${node.data?.label || node.id} by ${reason}`,
+        status: 'cancelled',
+        message: 'Previous run stopped.',
+      })
+    } else {
+      await finishRunHistory({
+        id: run.id,
+        startedAt,
+        trigger: `${node.data?.label || node.id} by ${reason}`,
+        status: 'failed',
+        message: error.message,
+      })
+      throw error
+    }
   } finally {
     if (runningTriggers.get(node.id)?.id === run.id) runningTriggers.delete(node.id)
     broadcastRunner()
@@ -859,6 +983,18 @@ function broadcastRunner() {
 
 function broadcastNodeState(state, node, extra = {}) {
   const time = new Date().toISOString()
+  if (extra.runId && state !== 'progress') {
+    const events = activeRunEvents.get(extra.runId) ?? []
+    events.push({
+      nodeId: node.id,
+      label: node.data?.label || node.id,
+      kind: node.data?.kind || 'node',
+      state,
+      time,
+    })
+    activeRunEvents.set(extra.runId, events.slice(-80))
+  }
+
   if (state !== 'progress') {
     nodeRuntime.set(node.id, {
       ...(nodeRuntime.get(node.id) ?? {}),
@@ -893,6 +1029,42 @@ function broadcastNodeState(state, node, extra = {}) {
       ...extra,
     },
   })
+}
+
+function beginRunHistory(runId) {
+  activeRunEvents.set(runId, [])
+}
+
+async function finishRunHistory({ id, startedAt, trigger, status, message }) {
+  const completedAt = new Date().toISOString()
+  const events = activeRunEvents.get(id) ?? []
+  activeRunEvents.delete(id)
+  const entry = {
+    id,
+    startedAt,
+    completedAt,
+    durationMs: Math.max(0, Date.parse(completedAt) - Date.parse(startedAt)),
+    trigger,
+    status,
+    message,
+    nodes: events.filter((event) => event.state === 'start').map((event) => ({
+      id: event.nodeId,
+      label: event.label,
+      kind: event.kind,
+    })),
+    stoppedAt: events.filter((event) => event.state === 'stop').map((event) => ({
+      id: event.nodeId,
+      label: event.label,
+      kind: event.kind,
+    })),
+  }
+  runHistory = [entry, ...runHistory].slice(0, 50)
+  await writeJson(runHistoryPath, runHistory)
+  broadcast({ type: 'run-history', history: runHistory })
+}
+
+function normalizeRunHistory(history) {
+  return Array.isArray(history) ? history.filter((entry) => entry?.id && entry?.startedAt).slice(0, 50) : []
 }
 
 function persistNodeRuntime() {
@@ -1239,6 +1411,54 @@ async function isActiveFlowPaused() {
 
 async function writeFlow(flowId, flow) {
   await writeJson(getFlowPath(flowId), normalizeFlow(flow))
+}
+
+async function getStarterPackFlows() {
+  const simpleMotion = await readJson(path.join(examplesDir, 'simple-motion-light.json'), createSimpleMotionFlow())
+  const pico = await readJson(path.join(examplesDir, '5-button-pico-example.json'), createFiveButtonPicoFlow())
+  return [
+    { name: 'Starter - Simple Motion Light', flow: simpleMotion },
+    { name: 'Starter - 5 Button Pico Controller', flow: pico },
+    { name: 'Starter - Contact Sensor Notification', flow: createContactNotificationFlow() },
+    { name: 'Starter - Scheduled Evening Scene', flow: createScheduledSceneFlow() },
+  ]
+}
+
+function createSimpleMotionFlow() {
+  return {
+    nodes: [
+      { id: 'starter-motion-trigger', type: 'haflow', position: { x: 80, y: 90 }, data: { kind: 'state', label: 'Motion Detected', entityId: 'binary_sensor.example_motion', from: 'off', to: 'on' } },
+      { id: 'starter-motion-action', type: 'haflow', position: { x: 380, y: 90 }, data: { kind: 'service', label: 'Turn Light On', domain: 'light', service: 'turn_on', entityId: 'light.example_light', entityIds: ['light.example_light'], payload: '{\n  "brightness_pct": 65\n}' } },
+    ],
+    edges: [{ id: 'starter-motion-edge', source: 'starter-motion-trigger', target: 'starter-motion-action', animated: true }],
+    viewport: { x: 0, y: 0, zoom: 1 },
+  }
+}
+
+function createFiveButtonPicoFlow() {
+  return { nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 } }
+}
+
+function createContactNotificationFlow() {
+  return {
+    nodes: [
+      { id: 'starter-door-open', type: 'haflow', position: { x: 80, y: 100 }, data: { kind: 'state', label: 'Door Opened', entityId: 'binary_sensor.example_door', from: 'off', to: 'on', triggers: [{ id: 'starter-door-rule', entityId: 'binary_sensor.example_door', deviceId: '', deviceIdentifiers: [], from: 'off', to: 'on' }] } },
+      { id: 'starter-door-notify', type: 'haflow', position: { x: 390, y: 100 }, data: { kind: 'service', label: 'Send Notification', domain: 'persistent_notification', service: 'create', entityIds: [], entityId: '', payload: '{\n  "message": "The example door was opened.",\n  "title": "HAFlow"\n}' } },
+    ],
+    edges: [{ id: 'starter-door-edge', source: 'starter-door-open', target: 'starter-door-notify', animated: true }],
+    viewport: { x: 0, y: 0, zoom: 1 },
+  }
+}
+
+function createScheduledSceneFlow() {
+  return {
+    nodes: [
+      { id: 'starter-evening-time', type: 'haflow', position: { x: 80, y: 100 }, data: { kind: 'time', label: 'Every Evening', at: '19:00' } },
+      { id: 'starter-evening-scene', type: 'haflow', position: { x: 390, y: 100 }, data: { kind: 'scene', label: 'Turn On Scene', entityId: 'scene.example_evening' } },
+    ],
+    edges: [{ id: 'starter-evening-edge', source: 'starter-evening-time', target: 'starter-evening-scene', animated: true }],
+    viewport: { x: 0, y: 0, zoom: 1 },
+  }
 }
 
 function getFlowPath(flowId) {
