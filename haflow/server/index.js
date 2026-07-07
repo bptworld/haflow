@@ -34,6 +34,7 @@ let runHistory = []
 let activeRunEvents = new Map()
 let cachedFlow = { nodes: [], edges: [] }
 let cachedFlowMeta = { id: 'default', name: 'Default Flow', paused: false }
+let runnableFlowCache = null
 let waiters = []
 let deviceRegistryById = new Map()
 const ANY_CHANGE = '__changed__'
@@ -169,6 +170,7 @@ app.get('/api/flows/default', async (_, res) => {
   await writeJson(configPath, config)
   cachedFlow = await readFlow('default')
   cachedFlowMeta = await readFlowMeta('default')
+  invalidateRunnableFlowCache()
   res.json(cachedFlow)
 })
 
@@ -189,6 +191,7 @@ app.get('/api/flows/:flowId', async (req, res) => {
   await writeJson(configPath, config)
   cachedFlow = await readFlow(flowId)
   cachedFlowMeta = await readFlowMeta(flowId)
+  invalidateRunnableFlowCache()
   broadcastRunner()
   res.json(cachedFlow)
 })
@@ -318,7 +321,7 @@ app.put('/api/runner', async (req, res) => {
 
   if (config.runnerEnabled) {
     reconnectHomeAssistant()
-    log('info', 'Automatic runner enabled.')
+    log('info', 'Automatic runner enabled for all unpaused flows.')
   } else {
     log('warn', 'Automatic runner disabled.')
   }
@@ -559,16 +562,17 @@ async function executeNode(node, options = {}) {
 }
 
 async function fireTimeTriggers() {
-  if (await isActiveFlowPaused()) return
   const now = new Date()
   const key = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}-${now.getHours()}-${now.getMinutes()}`
   if (key === lastTimeKey) return
   lastTimeKey = key
 
   const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
-  const matches = cachedFlow.nodes.filter((node) => !node.data?.disabled && node.data?.kind === 'time' && node.data?.at === currentTime)
-  for (const node of matches) {
-    triggerNode(node, { reason: `time ${currentTime}` }).catch((error) => log('error', error.message))
+  for (const entry of await getRunnableFlowEntries()) {
+    const matches = entry.flow.nodes.filter((node) => !node.data?.disabled && node.data?.kind === 'time' && node.data?.at === currentTime)
+    for (const node of matches) {
+      triggerNode(entry.flow, entry.meta, node, { reason: `time ${currentTime}` }).catch((error) => log('error', error.message))
+    }
   }
 }
 
@@ -590,10 +594,18 @@ async function handleHomeAssistantEvent(event) {
   }
 
   if (!config.runnerEnabled) return
-  if (await isActiveFlowPaused()) return
   logDeviceEventIfRelevant(event)
 
-  const matches = cachedFlow.nodes.filter((node) => {
+  for (const entry of await getRunnableFlowEntries()) {
+    const matches = findMatchingTriggerNodes(entry.flow, event)
+    for (const node of matches) {
+      triggerNode(entry.flow, entry.meta, node, { reason: event.event_type }).catch((error) => log('error', error.message))
+    }
+  }
+}
+
+function findMatchingTriggerNodes(flow, event) {
+  return (flow.nodes ?? []).filter((node) => {
     const data = node.data ?? {}
     if (data.disabled) return false
     if (data.kind === 'event') {
@@ -612,46 +624,43 @@ async function handleHomeAssistantEvent(event) {
       ...rule,
       label: data.label,
       deviceIdentifiers: rule.deviceIdentifiers ?? data.deviceIdentifiers,
-      buttonNumber: rule.buttonNumber ?? data.buttonNumber ?? inferGroupedButtonNumber(node),
+      buttonNumber: rule.buttonNumber ?? data.buttonNumber ?? inferGroupedButtonNumber(node, flow),
     }))
     if (event.event_type !== 'state_changed') return rules.some((rule) => deviceTriggerMatches(rule, event))
     return rules.some((rule) => stateTriggerMatches(rule, event.data ?? {}) || deviceTriggerMatches(rule, event))
   })
-
-  for (const node of matches) {
-    triggerNode(node, { reason: event.event_type }).catch((error) => log('error', error.message))
-  }
 }
 
-async function triggerNode(node, { reason }) {
-  const existingRun = runningTriggers.get(node.id)
+async function triggerNode(flow, flowMeta, node, { reason }) {
+  const runKey = `${flowMeta.id}:${node.id}`
+  const existingRun = runningTriggers.get(runKey)
   if (existingRun) {
     existingRun.controller.abort()
-    log('info', `${node.data?.label || node.id} restarted; previous run was cancelled.`)
+    log('info', `${flowMeta.name}: ${node.data?.label || node.id} restarted; previous run was cancelled.`)
   }
 
   const run = { id: crypto.randomUUID(), controller: new AbortController() }
-  runningTriggers.set(node.id, run)
+  runningTriggers.set(runKey, run)
   beginRunHistory(run.id)
   broadcastRunner()
   const startedAt = new Date().toISOString()
   try {
-    log('info', `${node.data?.label || node.id} triggered by ${reason}.`)
-    const result = await runFlow(cachedFlow, node.id, { runId: run.id, skipStartExecution: node.id, signal: run.controller.signal })
+    log('info', `${flowMeta.name}: ${node.data?.label || node.id} triggered by ${reason}.`)
+    const result = await runFlow(flow, node.id, { runId: run.id, skipStartExecution: node.id, signal: run.controller.signal })
     await finishRunHistory({
       id: run.id,
       startedAt,
-      trigger: `${node.data?.label || node.id} by ${reason}`,
+      trigger: `${flowMeta.name}: ${node.data?.label || node.id} by ${reason}`,
       status: 'completed',
       message: result,
     })
   } catch (error) {
     if (isCancelledError(error)) {
-      log('info', `${node.data?.label || node.id} previous run stopped.`)
+      log('info', `${flowMeta.name}: ${node.data?.label || node.id} previous run stopped.`)
       await finishRunHistory({
         id: run.id,
         startedAt,
-        trigger: `${node.data?.label || node.id} by ${reason}`,
+        trigger: `${flowMeta.name}: ${node.data?.label || node.id} by ${reason}`,
         status: 'cancelled',
         message: 'Previous run stopped.',
       })
@@ -659,14 +668,14 @@ async function triggerNode(node, { reason }) {
       await finishRunHistory({
         id: run.id,
         startedAt,
-        trigger: `${node.data?.label || node.id} by ${reason}`,
+        trigger: `${flowMeta.name}: ${node.data?.label || node.id} by ${reason}`,
         status: 'failed',
         message: error.message,
       })
       throw error
     }
   } finally {
-    if (runningTriggers.get(node.id)?.id === run.id) runningTriggers.delete(node.id)
+    if (runningTriggers.get(runKey)?.id === run.id) runningTriggers.delete(runKey)
     broadcastRunner()
   }
 }
@@ -1286,11 +1295,11 @@ function getButtonNumberFromLabel(label) {
   return match ? Number(match[1]) : undefined
 }
 
-function inferGroupedButtonNumber(node) {
+function inferGroupedButtonNumber(node, flow = cachedFlow) {
   if (!node?.parentId || node.data?.kind !== 'state') return getButtonNumberFromLabel(node?.data?.label)
   const deviceId = node.data.deviceId || getStateTriggerRules(node.data)[0]?.deviceId
   if (!deviceId) return getButtonNumberFromLabel(node.data?.label)
-  const siblings = (cachedFlow.nodes ?? [])
+  const siblings = (flow.nodes ?? [])
     .filter((item) => {
       if (item.parentId !== node.parentId || item.data?.kind !== 'state') return false
       const siblingDeviceId = item.data.deviceId || getStateTriggerRules(item.data)[0]?.deviceId
@@ -1389,6 +1398,7 @@ async function readFlowIndex() {
 
 async function writeFlowIndex(flows) {
   await writeJson(flowIndexPath, flows.map(normalizeFlowMeta))
+  invalidateRunnableFlowCache()
 }
 
 async function readFlow(flowId) {
@@ -1404,6 +1414,18 @@ async function readFlowMeta(flowId) {
   return flows.find((flow) => flow.id === flowId) ?? normalizeFlowMeta({ id: flowId || 'default', name: flowId || 'Default Flow' })
 }
 
+async function getRunnableFlowEntries() {
+  if (runnableFlowCache) return runnableFlowCache
+  const flows = await readFlowIndex()
+  runnableFlowCache = await Promise.all(flows
+    .filter((meta) => !meta.paused)
+    .map(async (meta) => ({
+      meta,
+      flow: meta.id === (config.activeFlowId ?? 'default') ? cachedFlow : await readFlow(meta.id),
+    })))
+  return runnableFlowCache
+}
+
 async function isActiveFlowPaused() {
   cachedFlowMeta = await readFlowMeta(config.activeFlowId ?? 'default')
   return Boolean(cachedFlowMeta.paused)
@@ -1411,6 +1433,11 @@ async function isActiveFlowPaused() {
 
 async function writeFlow(flowId, flow) {
   await writeJson(getFlowPath(flowId), normalizeFlow(flow))
+  invalidateRunnableFlowCache()
+}
+
+function invalidateRunnableFlowCache() {
+  runnableFlowCache = null
 }
 
 async function getStarterPackFlows() {

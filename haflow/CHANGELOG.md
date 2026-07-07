@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.12
+
+- Fix automatic triggers so the runner watches every saved, unpaused flow instead of only the currently active flow.
+- Preserve grouped device button matching when flows run in the background.
+- Cache runnable flows in memory so event matching stays fast.
+
 ## 0.1.11
 
 - Make the Library section collapsible and remember its open or closed state.
