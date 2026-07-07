@@ -202,6 +202,10 @@ function getInitialLibraryCollapsed() {
   return window.localStorage.getItem('haflow-library-collapsed') === 'true'
 }
 
+function getInitialRunHistoryCollapsed() {
+  return window.localStorage.getItem('haflow-run-history-collapsed') === 'true'
+}
+
 function createId() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID()
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
@@ -820,6 +824,7 @@ function FlowWorkspace() {
   const [theme, setTheme] = useState(getInitialTheme)
   const [isInspectorCollapsed, setIsInspectorCollapsed] = useState(getInitialInspectorCollapsed)
   const [isLibraryCollapsed, setIsLibraryCollapsed] = useState(getInitialLibraryCollapsed)
+  const [isRunHistoryCollapsed, setIsRunHistoryCollapsed] = useState(getInitialRunHistoryCollapsed)
   const [isLogModalOpen, setIsLogModalOpen] = useState(false)
   const [logQuery, setLogQuery] = useState('')
   const isDarkTheme = theme === 'dark'
@@ -951,6 +956,10 @@ function FlowWorkspace() {
   useEffect(() => {
     window.localStorage.setItem('haflow-library-collapsed', String(isLibraryCollapsed))
   }, [isLibraryCollapsed])
+
+  useEffect(() => {
+    window.localStorage.setItem('haflow-run-history-collapsed', String(isRunHistoryCollapsed))
+  }, [isRunHistoryCollapsed])
 
   useEffect(() => {
     Promise.all([
@@ -1939,19 +1948,24 @@ function FlowWorkspace() {
               <div className="validation-item" key={`${issue}-${index}`}><AlertTriangle size={14} /> {issue}</div>
             )) : <div className="validation-ok"><Check size={14} /> Flow looks ready</div>}
           </div>
-          <div className="section-title">Run History</div>
-          <div className="run-history-list">
-            {runHistory.length ? runHistory.slice(0, 10).map((entry) => (
-              <div className={`run-history-item ${entry.status}`} key={entry.id}>
-                <div>
-                  <strong>{entry.status === 'completed' ? 'Completed' : entry.status === 'cancelled' ? 'Cancelled' : 'Failed'}</strong>
-                  <span>{formatNodeRunTime(entry.startedAt)} · {formatDuration(entry.durationMs)}</span>
+          <button className="section-title collapsible-section-title" onClick={() => setIsRunHistoryCollapsed((current) => !current)} type="button">
+            <span>Run History</span>
+            {isRunHistoryCollapsed ? <ChevronRight size={15} /> : <ChevronDown size={15} />}
+          </button>
+          {!isRunHistoryCollapsed ? (
+            <div className="run-history-list">
+              {runHistory.length ? runHistory.slice(0, 10).map((entry) => (
+                <div className={`run-history-item ${entry.status}`} key={entry.id}>
+                  <div>
+                    <strong>{entry.status === 'completed' ? 'Completed' : entry.status === 'cancelled' ? 'Cancelled' : 'Failed'}</strong>
+                    <span>{formatNodeRunTime(entry.startedAt)} · {formatDuration(entry.durationMs)}</span>
+                  </div>
+                  <p>{entry.trigger}</p>
+                  <small>{entry.nodes?.length ? `${entry.nodes.length} node${entry.nodes.length === 1 ? '' : 's'} touched` : 'No nodes touched'}{entry.message ? ` · ${entry.message}` : ''}</small>
                 </div>
-                <p>{entry.trigger}</p>
-                <small>{entry.nodes?.length ? `${entry.nodes.length} node${entry.nodes.length === 1 ? '' : 's'} touched` : 'No nodes touched'}{entry.message ? ` · ${entry.message}` : ''}</small>
-              </div>
-            )) : <div className="empty-state compact"><History size={24} /><p>No runs yet.</p></div>}
-          </div>
+              )) : <div className="empty-state compact"><History size={24} /><p>No runs yet.</p></div>}
+            </div>
+          ) : null}
           <div className="section-title">Entities</div>
           <div className="search-box">
             <Search size={15} />

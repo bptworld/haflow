@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.18
+
+- Make Run History collapsible.
+- Remember the Run History open or closed state across refreshes and app restarts.
+
 ## 0.1.17
 
 - Show flow activation log entries as green `Flow Activated` messages.
