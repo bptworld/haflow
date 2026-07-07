@@ -37,6 +37,7 @@ let cachedFlowMeta = { id: 'default', name: 'Default Flow', paused: false }
 let runnableFlowCache = null
 let waiters = []
 let deviceRegistryById = new Map()
+let entityRegistryDeviceByEntityId = new Map()
 const ANY_CHANGE = '__changed__'
 const LUTRON_5_BUTTON_PICO_BUTTONS = [1, 2, 5, 3, 4]
 
@@ -79,6 +80,9 @@ app.get('/api/entity-catalog', async (_, res) => {
     const deviceById = new Map(devices.map((device) => [device.id, device]))
     deviceRegistryById = deviceById
     const registryByEntityId = new Map(registryEntities.map((entity) => [entity.entity_id, entity]))
+    entityRegistryDeviceByEntityId = new Map(registryEntities
+      .filter((entity) => entity.entity_id && entity.device_id)
+      .map((entity) => [entity.entity_id, entity.device_id]))
     const stateEntityIds = new Set(states.map((state) => state.entity_id))
     const devicesWithStateEntities = new Set(registryEntities
       .filter((entity) => entity.device_id && stateEntityIds.has(entity.entity_id))
@@ -593,10 +597,11 @@ async function handleHomeAssistantEvent(event) {
     })
   }
 
-  if (!config.runnerEnabled) return
-  logDeviceEventIfRelevant(event)
   const runnableEntries = await getRunnableFlowEntries()
   logWatchedStateChange(event, runnableEntries)
+
+  if (!config.runnerEnabled) return
+  logDeviceEventIfRelevant(event)
 
   for (const entry of runnableEntries) {
     const matches = findMatchingTriggerNodes(entry.flow, event)
@@ -731,8 +736,14 @@ function scheduleReconnect() {
 }
 
 async function refreshDeviceRegistry() {
-  const devices = await haWsCommand('config/device_registry/list')
+  const [devices, registryEntities] = await Promise.all([
+    haWsCommand('config/device_registry/list'),
+    haWsCommand('config/entity_registry/list'),
+  ])
   deviceRegistryById = new Map(devices.map((device) => [device.id, device]))
+  entityRegistryDeviceByEntityId = new Map(registryEntities
+    .filter((entity) => entity.entity_id && entity.device_id)
+    .map((entity) => [entity.entity_id, entity.device_id]))
 }
 
 function closeHomeAssistantSocket() {
@@ -1231,11 +1242,26 @@ function getStateTriggerRules(data) {
 }
 
 function stateTriggerMatches(rule, stateData) {
-  if (rule.deviceId) return false
-  if (!rule.entityId || stateData.entity_id !== rule.entityId) return false
+  if (!rule.entityId && !rule.deviceId) return false
+  const hasButtonFilter = rule.buttonNumber !== undefined && rule.buttonNumber !== null && rule.buttonNumber !== ''
+  if (rule.entityId && stateData.entity_id !== rule.entityId) {
+    if (hasButtonFilter) return false
+    const entityDeviceId = getEntityDeviceId(stateData.entity_id)
+    if (!rule.deviceId || entityDeviceId !== rule.deviceId) return false
+  }
+  if (!rule.entityId && rule.deviceId) {
+    if (hasButtonFilter) return false
+    if (getEntityDeviceId(stateData.entity_id) !== rule.deviceId) return false
+  }
   if (hasStateFilter(rule.from) && stateData.old_state?.state !== rule.from) return false
   if (hasStateFilter(rule.to) && stateData.new_state?.state !== rule.to) return false
   return true
+}
+
+function getEntityDeviceId(entityId) {
+  if (!entityId) return ''
+  if (String(entityId).startsWith('device.')) return String(entityId).slice('device.'.length)
+  return entityRegistryDeviceByEntityId.get(entityId) || ''
 }
 
 function deviceTriggerMatches(rule, event) {
@@ -1281,7 +1307,8 @@ function logWatchedStateChange(event, entries) {
   const oldState = event.data?.old_state?.state ?? 'unknown'
   const newState = event.data?.new_state?.state ?? 'unknown'
   const matched = entries.flatMap((entry) => findMatchingTriggerNodes(entry.flow, event).map((node) => `${entry.meta.name}: ${node.data?.label || node.id}`))
-  log(matched.length ? 'info' : 'debug', `Trigger entity changed: ${entityId} ${oldState} -> ${newState}; ${matched.length ? `matched ${matched.join(', ')}` : `no match for ${watchers.join(', ')}`}.`)
+  const runnerNote = config.runnerEnabled ? '' : ' Runner is disabled, so no flow was run.'
+  log(matched.length ? 'info' : 'debug', `Trigger entity changed: ${entityId} ${oldState} -> ${newState}; ${matched.length ? `matched ${matched.join(', ')}` : `no match for ${watchers.join(', ')}`}.${runnerNote}`)
 }
 
 function getWatchedEntityTriggerDetails(entries) {
@@ -1295,6 +1322,7 @@ function getWatchedEntityTriggerDetails(entries) {
       if (data.kind === 'state') {
         for (const rule of getStateTriggerRules(data)) {
           if (rule.entityId) entityIds.push(rule.entityId)
+          if (rule.deviceId) entityIds.push(...getDeviceEntityIds(rule.deviceId))
         }
       }
       for (const entityId of entityIds) {
@@ -1310,8 +1338,9 @@ function getWatchedEntityTriggerDetails(entries) {
 async function logRunnerWatchSummary() {
   const entries = await getRunnableFlowEntries()
   const triggerCount = entries.reduce((total, entry) => total + (entry.flow.nodes ?? []).filter((node) => !node.data?.disabled && ['state', 'event', 'time'].includes(node.data?.kind)).length, 0)
-  const entityCount = getWatchedEntityTriggerDetails(entries).size
-  log('info', `Watching ${triggerCount} trigger node${triggerCount === 1 ? '' : 's'} across ${entries.length} unpaused flow${entries.length === 1 ? '' : 's'} (${entityCount} entity trigger${entityCount === 1 ? '' : 's'}).`)
+  const watchedEntities = Array.from(getWatchedEntityTriggerDetails(entries).keys()).sort()
+  log(config.runnerEnabled ? 'info' : 'warn', `${config.runnerEnabled ? 'Watching' : 'Runner disabled; configured'} ${triggerCount} trigger node${triggerCount === 1 ? '' : 's'} across ${entries.length} unpaused flow${entries.length === 1 ? '' : 's'} (${watchedEntities.length} entity trigger${watchedEntities.length === 1 ? '' : 's'}).`)
+  if (watchedEntities.length) log('info', `Watched trigger entities: ${watchedEntities.slice(0, 24).join(', ')}${watchedEntities.length > 24 ? `, +${watchedEntities.length - 24} more` : ''}.`)
 }
 
 function getTrackedDeviceTriggerDetails() {
@@ -1329,6 +1358,13 @@ function getTrackedDeviceTriggerDetails() {
     }
   }
   return { deviceIds, serials }
+}
+
+function getDeviceEntityIds(deviceId) {
+  if (!deviceId) return []
+  return Array.from(entityRegistryDeviceByEntityId.entries())
+    .filter(([, entityDeviceId]) => entityDeviceId === deviceId)
+    .map(([entityId]) => entityId)
 }
 
 function getRuleSerials(rule) {

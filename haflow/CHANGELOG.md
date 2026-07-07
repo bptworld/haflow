@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.15
+
+- Show watched trigger entity IDs in the Run Log startup diagnostics.
+- Warn when triggers are configured but the automatic runner is disabled.
+- Match device-based state triggers against real Home Assistant entities from that device.
+
 ## 0.1.14
 
 - Move the Run Log under the left panel runner controls.
