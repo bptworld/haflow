@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.6
+
+- Resize flow action buttons so Pause and Resume labels fit cleanly.
+
 ## 0.1.5
 
 - Add Home Assistant-visible changelog.

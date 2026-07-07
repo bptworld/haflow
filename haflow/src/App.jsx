@@ -1532,7 +1532,7 @@ function FlowWorkspace() {
               {activeFlow?.paused ? <Play size={16} /> : <Pause size={16} />}
               {activeFlow?.paused ? 'Resume' : 'Pause'}
             </button>
-            <button disabled={activeFlowId === 'default'} onClick={deleteFlow} title="Delete flow" type="button"><Trash2 size={16} /></button>
+            <button className="delete-flow" disabled={activeFlowId === 'default'} onClick={deleteFlow} title="Delete flow" type="button"><Trash2 size={16} /></button>
           </div>
         </div>
         <div className="section-title">Nodes</div>
