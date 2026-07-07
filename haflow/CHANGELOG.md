@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.25
+
+- Change node tile summaries to describe configured behavior instead of showing current entity status now that the canvas Devices panel shows live status.
+
 ## 0.1.24
 
 - Make tight canvas connections easier by increasing the snap radius and allowing loose handle starts while keeping End nodes terminal-safe.

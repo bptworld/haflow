@@ -383,40 +383,66 @@ const nodeTypes = { haflow: NodeBody }
 function summarizeNode(data) {
   const selectedCount = data.entityIds?.length ?? 0
   const entityName = formatEntityRef(data)
-  const entityState = data.entityStatusLabel || formatEntityStatus(data.entityStatus)
+  const entity = data.entityContext
   if (data.kind === 'state') {
     const rules = getStateTriggerRules(data)
     if (rules.length > 1) return `${rules.length} triggers`
-    return data.entityId ? { name: entityName, status: entityState } : 'Choose an entity'
+    return data.entityId ? formatTriggerIntent(rules[0], entity) : 'Choose an entity'
   }
   if (data.kind === 'event') {
-    if (data.eventType === 'state_changed' && data.entityId) return { name: entityName, status: entityState }
+    if (data.eventType === 'state_changed' && data.entityId) return formatTriggerIntent(data, entity)
     return data.eventType || 'Any event'
   }
   if (data.kind === 'time') return `At ${data.at || '00:00'}`
   if (data.kind === 'condition') {
     const rules = getConditionRules(data)
     if (rules.length > 1) return `${rules.length} ${data.conditionMode === 'all' ? 'AND' : 'OR'} conditions`
-    return data.entityId ? { name: entityName, status: entityState } : 'Choose a condition'
+    return data.entityId ? formatConditionIntent(rules[0], entity) : 'Choose a condition'
   }
   if (data.kind === 'or') return 'Any incoming path continues'
-  if (data.kind === 'delay') return `${data.seconds || 0}s`
-  if (data.kind === 'wait') return data.entityId ? { name: entityName, status: entityState } : 'Choose an entity'
+  if (data.kind === 'delay') return `Wait ${data.seconds || 0}s`
+  if (data.kind === 'wait') return data.entityId ? `Until ${formatAttributeName(data.attribute || 'state')} is ${formatStateOption(data.to || '', entity)}` : 'Choose an entity'
   if (data.kind === 'end') return 'Branch stops here'
   if (data.kind === 'service') {
-    if (data.actionEntities?.length) {
-      return data.actionEntities.map((entity) => ({ name: entity.name, status: entity.statusLabel || formatEntityStatus(entity.state) }))
-    }
-    return selectedCount ? `${selectedCount} devices selected` : 'Choose entities'
+    const serviceIntent = data.domain && data.service ? `Run ${data.domain}.${data.service}` : 'Choose service'
+    if (data.actionEntities?.length) return [serviceIntent, formatTargetSummary(data.actionEntities)]
+    return selectedCount ? [serviceIntent, `${selectedCount} targets`] : 'Choose entities'
   }
-  if (data.kind === 'notify') return data.message || 'Notification'
-  if (data.kind === 'scene') return data.entityId ? { name: entityName, status: entityState } : 'Choose a scene'
+  if (data.kind === 'notify') return data.target ? `Notify ${data.target}` : data.message || 'Notification'
+  if (data.kind === 'scene') return data.entityId ? `Turn on ${entityName}` : 'Choose a scene'
   if (data.kind === 'group') return 'Same-screen subflow'
   return data.message || 'Debug output'
 }
 
 function formatEntityRef(data) {
   return data.entityDisplayName || data.entityId || 'Entity'
+}
+
+function formatTargetSummary(entities) {
+  if (!entities.length) return 'No targets'
+  if (entities.length === 1) return entities[0].name
+  return `${entities.length} targets`
+}
+
+function formatTriggerIntent(rule, entity) {
+  const from = rule.from && rule.from !== ANY_CHANGE ? formatStateOption(rule.from, entity) : ''
+  const to = rule.to && rule.to !== ANY_CHANGE ? formatStateOption(rule.to, entity) : ''
+  if (from && to) return `${from} -> ${to}`
+  if (to) return `Becomes ${to}`
+  if (from) return `Leaves ${from}`
+  return 'Any state change'
+}
+
+function formatConditionIntent(rule, entity) {
+  const attribute = formatAttributeName(rule.attribute || 'state')
+  const value = formatStateOption(rule.value || '', rule.attribute === 'state' ? entity : undefined)
+  return `${attribute} ${formatOperatorLabel(rule.operator)} ${value}`.trim()
+}
+
+function formatOperatorLabel(operator) {
+  if (operator === 'not_equals') return 'not equals'
+  if (operator === 'contains') return 'contains'
+  return 'equals'
 }
 
 function formatEntityStatus(value, entity) {
@@ -726,6 +752,7 @@ function enrichNodeDisplayData(data, entityById, runtimeState, now, forceSnapsho
   return {
     ...data,
     actionEntities,
+    entityContext: entity,
     entityDisplayName: entity?.friendlyName || data?.entityId,
     entityStatus: entity?.state,
     entityStatusLabel: formatEntityStatus(entity?.state, entity),
