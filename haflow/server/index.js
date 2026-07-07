@@ -138,13 +138,14 @@ app.get('/api/flows', async (_, res) => {
 app.post('/api/flows', async (req, res) => {
   const sourceFlow = req.body.sourceFlowId ? await readFlow(req.body.sourceFlowId) : { nodes: [], edges: [] }
   const sourceMeta = req.body.sourceFlowId ? (await readFlowIndex()).find((item) => item.id === req.body.sourceFlowId) : null
+  const flows = await readFlowIndex()
+  const name = ensureUniqueFlowName(req.body.name || 'New Flow', flows)
   const flow = {
-    id: slugifyFlowId(req.body.name || 'New Flow'),
-    name: String(req.body.name || 'New Flow').trim() || 'New Flow',
+    id: slugifyFlowId(name),
+    name,
     createdAt: new Date().toISOString(),
     paused: Boolean(sourceMeta?.paused),
   }
-  const flows = await readFlowIndex()
   flow.id = ensureUniqueFlowId(flow.id, flows)
   await writeJson(getFlowPath(flow.id), sourceFlow)
   await writeFlowIndex([...flows, flow])
@@ -1599,6 +1600,15 @@ function ensureUniqueFlowId(baseId, flows) {
   let index = 2
   while (existing.has(`${baseId}-${index}`)) index += 1
   return `${baseId}-${index}`
+}
+
+function ensureUniqueFlowName(name, flows) {
+  const baseName = String(name || 'New Flow').trim() || 'New Flow'
+  const existing = new Set(flows.map((flow) => String(flow.name || '').trim().toLowerCase()))
+  if (!existing.has(baseName.toLowerCase())) return baseName
+  let index = 2
+  while (existing.has(`${baseName} ${index}`.toLowerCase())) index += 1
+  return `${baseName} ${index}`
 }
 
 function normalizeFlowMeta(flow) {

@@ -487,6 +487,15 @@ function formatOperatorLabel(operator) {
   return 'equals'
 }
 
+function getUniqueFlowName(name, flows) {
+  const baseName = String(name || 'New Flow').trim() || 'New Flow'
+  const existing = new Set(flows.map((flow) => String(flow.name || '').trim().toLowerCase()))
+  if (!existing.has(baseName.toLowerCase())) return baseName
+  let index = 2
+  while (existing.has(`${baseName} ${index}`.toLowerCase())) index += 1
+  return `${baseName} ${index}`
+}
+
 function formatEntityStatus(value, entity) {
   if (value === undefined || value === null || value === '') return 'Unknown'
   return formatStateOption(value, entity)
@@ -1666,7 +1675,8 @@ function FlowWorkspace() {
   }
 
   const createFlow = async (duplicate = false) => {
-    const name = newFlowName.trim() || (duplicate ? `${activeFlow?.name || 'Flow'} Copy` : 'New Flow')
+    const baseName = newFlowName.trim() || (duplicate ? `${activeFlow?.name || 'Flow'} Copy` : 'New Flow')
+    const name = getUniqueFlowName(baseName, flows)
     const response = await apiFetch('/api/flows', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

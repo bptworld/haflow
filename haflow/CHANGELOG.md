@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.32
+
+- Prevent duplicate flow names by automatically numbering new or copied flows.
+
 ## 0.1.31
 
 - Suppress placeholder action validation warnings inside button-controller groups.
