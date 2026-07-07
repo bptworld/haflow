@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.13
+
+- Add trigger diagnostics for watched Home Assistant entity changes.
+- Mirror HAFlow run log messages to stdout for easier add-on log review.
+- Hide routine auto-save entries from the Run Log.
+
 ## 0.1.12
 
 - Fix automatic triggers so the runner watches every saved, unpaused flow instead of only the currently active flow.

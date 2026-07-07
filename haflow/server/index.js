@@ -595,8 +595,10 @@ async function handleHomeAssistantEvent(event) {
 
   if (!config.runnerEnabled) return
   logDeviceEventIfRelevant(event)
+  const runnableEntries = await getRunnableFlowEntries()
+  logWatchedStateChange(event, runnableEntries)
 
-  for (const entry of await getRunnableFlowEntries()) {
+  for (const entry of runnableEntries) {
     const matches = findMatchingTriggerNodes(entry.flow, event)
     for (const node of matches) {
       triggerNode(entry.flow, entry.meta, node, { reason: event.event_type }).catch((error) => log('error', error.message))
@@ -700,6 +702,7 @@ function reconnectHomeAssistant() {
     if (message.type === 'auth_ok') {
       haSocket.send(JSON.stringify({ id: haMessageId++, type: 'subscribe_events' }))
       log('info', 'Subscribed to Home Assistant events.')
+      logRunnerWatchSummary().catch((error) => log('warn', `Could not inspect watched triggers: ${error.message}`))
       refreshDeviceRegistry().catch((error) => log('warn', `Could not load Home Assistant devices: ${error.message}`))
       broadcastRunner()
       return
@@ -1266,6 +1269,51 @@ function logDeviceEventIfRelevant(event) {
   log('debug', `HA event ${event.event_type}: serial=${eventSerial || 'none'} device=${eventDeviceId || 'none'} button=${eventButton || 'none'} data=${JSON.stringify(data).slice(0, 500)}`)
 }
 
+function logWatchedStateChange(event, entries) {
+  if (event.event_type !== 'state_changed') return
+  const entityId = event.data?.entity_id
+  if (!entityId) return
+
+  const watched = getWatchedEntityTriggerDetails(entries)
+  const watchers = watched.get(entityId) ?? []
+  if (!watchers.length) return
+
+  const oldState = event.data?.old_state?.state ?? 'unknown'
+  const newState = event.data?.new_state?.state ?? 'unknown'
+  const matched = entries.flatMap((entry) => findMatchingTriggerNodes(entry.flow, event).map((node) => `${entry.meta.name}: ${node.data?.label || node.id}`))
+  log(matched.length ? 'info' : 'debug', `Trigger entity changed: ${entityId} ${oldState} -> ${newState}; ${matched.length ? `matched ${matched.join(', ')}` : `no match for ${watchers.join(', ')}`}.`)
+}
+
+function getWatchedEntityTriggerDetails(entries) {
+  const watched = new Map()
+  for (const entry of entries) {
+    for (const node of entry.flow.nodes ?? []) {
+      const data = node.data ?? {}
+      if (data.disabled) continue
+      const entityIds = []
+      if (data.kind === 'event' && data.entityId) entityIds.push(data.entityId)
+      if (data.kind === 'state') {
+        for (const rule of getStateTriggerRules(data)) {
+          if (rule.entityId) entityIds.push(rule.entityId)
+        }
+      }
+      for (const entityId of entityIds) {
+        const existing = watched.get(entityId) ?? []
+        existing.push(`${entry.meta.name}: ${data.label || node.id}`)
+        watched.set(entityId, existing)
+      }
+    }
+  }
+  return watched
+}
+
+async function logRunnerWatchSummary() {
+  const entries = await getRunnableFlowEntries()
+  const triggerCount = entries.reduce((total, entry) => total + (entry.flow.nodes ?? []).filter((node) => !node.data?.disabled && ['state', 'event', 'time'].includes(node.data?.kind)).length, 0)
+  const entityCount = getWatchedEntityTriggerDetails(entries).size
+  log('info', `Watching ${triggerCount} trigger node${triggerCount === 1 ? '' : 's'} across ${entries.length} unpaused flow${entries.length === 1 ? '' : 's'} (${entityCount} entity trigger${entityCount === 1 ? '' : 's'}).`)
+}
+
 function getTrackedDeviceTriggerDetails() {
   const deviceIds = new Set()
   const serials = new Set()
@@ -1360,7 +1408,10 @@ function publicConfig(connected) {
 }
 
 function log(level, message) {
+  if (message === 'Flow saved.') return
   const entry = { id: crypto.randomUUID(), time: new Date().toISOString(), level, message }
+  const logger = level === 'error' ? console.error : level === 'warn' ? console.warn : console.log
+  logger(`[${entry.time}] ${level.toUpperCase()} ${message}`)
   logs = [entry, ...logs].slice(0, 200)
   writeJson(logPath, logs).catch(() => {})
   broadcast({ type: 'log', entry })
