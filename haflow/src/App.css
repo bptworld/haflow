@@ -187,6 +187,17 @@ body,
   text-transform: uppercase;
 }
 
+.flow-select.is-paused {
+  color: #92400e;
+  background: #fffbeb;
+  border-color: #fbbf24;
+}
+
+.flow-option-paused {
+  color: #92400e;
+  background: #fffbeb;
+}
+
 button,
 input,
 select,
@@ -1786,7 +1797,9 @@ textarea:focus {
 .theme-dark .save-status.saving,
 .theme-dark .save-status.loading,
 .theme-dark .flow-library-actions .pause-flow,
-.theme-dark .flow-paused-badge {
+.theme-dark .flow-paused-badge,
+.theme-dark .flow-select.is-paused,
+.theme-dark .flow-option-paused {
   color: #fcd34d;
   background: rgba(180, 83, 9, 0.18);
   border-color: rgba(251, 191, 36, 0.38);

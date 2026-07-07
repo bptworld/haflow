@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.28
+
+- Highlight paused flows in orange in the flow dropdown and selected flow field.
+
 ## 0.1.27
 
 - Show human-readable action tile text such as `Turn on light` instead of raw Home Assistant service names like `Run light.turn_on`.

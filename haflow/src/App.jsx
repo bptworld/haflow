@@ -1955,8 +1955,12 @@ function FlowWorkspace() {
         </div>
         <div className="section-title">Flows</div>
         <div className="flow-library">
-          <select value={activeFlowId} onChange={(event) => loadFlow(event.target.value)}>
-            {sortedFlows.map((flow) => <option key={flow.id} value={flow.id}>{flow.paused ? '[Paused] ' : ''}{flow.name}</option>)}
+          <select className={activeFlow?.paused ? 'flow-select is-paused' : 'flow-select'} value={activeFlowId} onChange={(event) => loadFlow(event.target.value)}>
+            {sortedFlows.map((flow) => (
+              <option className={flow.paused ? 'flow-option-paused' : ''} key={flow.id} value={flow.id}>
+                {flow.paused ? '[Paused] ' : ''}{flow.name}
+              </option>
+            ))}
           </select>
           {activeFlow?.paused ? <div className="flow-paused-badge">Paused</div> : null}
           <input value={newFlowName} onChange={(event) => setNewFlowName(event.target.value)} placeholder="New flow name" />
