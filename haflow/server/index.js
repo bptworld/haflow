@@ -593,11 +593,15 @@ async function executeNode(node, options = {}) {
   }
 
   if (data.kind === 'notify') {
-    const target = data.target || 'notify.notify'
-    const [, service = 'notify'] = target.split('.')
+    const target = normalizeNotifyTarget(data)
+    const service = target.includes('.') ? target.split('.')[1] : target
     const message = renderRunMessage(data.message || 'HAFlow notification', options.context)
-    await callService('notify', service, { message })
-    log('info', `Sent notification via ${target}.`)
+    const payload = { message }
+    if (data.title) payload.title = renderRunMessage(data.title, options.context)
+    const notifyData = parseNotifyData(data.dataJson)
+    if (notifyData && Object.keys(notifyData).length) payload.data = notifyData
+    await callService('notify', service || 'notify', payload)
+    log('info', `Sent notification via notify.${service || 'notify'}.`)
     return true
   }
 
@@ -903,6 +907,17 @@ function renderRunMessage(message, context = {}) {
   return String(message ?? '').replace(/\{(direction|lastDirection)\}/gi, (token, key) => {
     return context[key] ?? context.direction ?? token
   })
+}
+
+function normalizeNotifyTarget(data) {
+  const value = String(data.notifyService || data.target || 'notify').trim()
+  return value.startsWith('notify.') ? value : `notify.${value || 'notify'}`
+}
+
+function parseNotifyData(dataJson) {
+  if (!dataJson || !String(dataJson).trim()) return {}
+  const parsed = JSON.parse(dataJson)
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
 }
 
 async function handleHomeAssistantEvent(event) {
@@ -2041,6 +2056,17 @@ function normalizeNodeData(data, nodeId) {
       directionAB: String(data.directionAB || 'in'),
       directionBA: String(data.directionBA || 'out'),
       targetEntityId: String(data.targetEntityId ?? ''),
+    }
+  }
+
+  if (data.kind === 'notify') {
+    const target = normalizeNotifyTarget(data)
+    return {
+      ...data,
+      target,
+      notifyService: String(data.notifyService || target.replace(/^notify\./, '') || ''),
+      title: String(data.title ?? ''),
+      dataJson: data.dataJson ?? '{}',
     }
   }
 

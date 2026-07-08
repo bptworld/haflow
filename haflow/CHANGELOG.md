@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.40
+
+- Make Notify nodes easier to configure by selecting available Home Assistant notify services from a dropdown.
+- Add optional Notify title and data JSON fields for service-specific options such as Pushover priority and sound.
+
 ## 0.1.39
 
 - Let Notify messages include the latest Direction node result with `{direction}`.

@@ -222,7 +222,7 @@ const nodeCatalog = [
     description: 'Sends a Home Assistant notification message. Use {direction} after a Direction node.',
     icon: Bell,
     color: '#be123c',
-    data: { message: 'HAFlow ran', target: '', label: 'Notify' },
+    data: { message: 'HAFlow ran', notifyService: '', target: '', title: '', dataJson: '{}', label: 'Notify' },
   },
   {
     type: 'scene',
@@ -445,7 +445,7 @@ function summarizeNode(data) {
     if (data.actionEntities?.length) return [serviceIntent, formatTargetSummary(data.actionEntities)]
     return selectedCount ? [serviceIntent, `${selectedCount} targets`] : 'Choose entities'
   }
-  if (data.kind === 'notify') return data.target ? `Notify ${data.target}` : data.message || 'Notification'
+  if (data.kind === 'notify') return data.notifyService ? `Notify notify.${data.notifyService}` : data.target ? `Notify ${data.target}` : data.message || 'Notification'
   if (data.kind === 'scene') return data.entityId ? `Turn on ${entityName}` : 'Choose a scene'
   if (data.kind === 'group') return 'Same-screen subflow'
   return data.message || 'Debug output'
@@ -767,6 +767,13 @@ function validateNodeData(data, entityById = new Map(), services = {}) {
       } catch {
         return 'Bad JSON'
       }
+    }
+  }
+  if (data.kind === 'notify' && data.dataJson && String(data.dataJson).trim()) {
+    try {
+      JSON.parse(data.dataJson)
+    } catch {
+      return 'Bad data JSON'
     }
   }
   if (data.kind === 'scene' && !data.entityId) return 'Missing scene'
@@ -2547,6 +2554,9 @@ function Inspector({ entities, node, services, updateNodeData }) {
     return Array.from(new Set([...stateOptions, data.from, data.to].filter(Boolean)))
   }, [data.from, data.to, stateOptions])
   const helperEntities = useMemo(() => entities.filter((entity) => ['input_text', 'input_select'].includes(entity.domain)), [entities])
+  const notifyServiceNames = services.notify ? Object.keys(services.notify).sort() : []
+  const notifyTarget = data.notifyService || data.target || ''
+  const notifyUsesCustomTarget = data.kind === 'notify' && notifyTarget && !notifyServiceNames.includes(notifyTarget)
   const domainOptions = Object.keys(services).sort()
   const serviceNames = data.domain && services[data.domain] ? Object.keys(services[data.domain]).sort() : []
 
@@ -2783,9 +2793,27 @@ function Inspector({ entities, node, services, updateNodeData }) {
       )}
       {data.kind === 'notify' && (
         <>
+          <label>
+            Service
+            <select
+              value={notifyUsesCustomTarget ? '__custom__' : notifyTarget}
+              onChange={(event) => {
+                if (event.target.value === '__custom__') updateNodeData({ notifyService: '', target: notifyTarget })
+                else updateNodeData({ notifyService: event.target.value, target: event.target.value })
+              }}
+            >
+              <option value="">notify.notify</option>
+              {notifyServiceNames.map((name) => <option key={name} value={name}>notify.{name}</option>)}
+              <option value="__custom__">Custom service</option>
+            </select>
+          </label>
+          {notifyUsesCustomTarget && (
+            <label>Custom service<input value={data.target ?? ''} onChange={(event) => updateNodeData({ target: event.target.value, notifyService: '' })} placeholder="notify.pushover" /></label>
+          )}
           <label>Message<input value={data.message ?? ''} onChange={(event) => updateNodeData({ message: event.target.value })} placeholder="Driveway motion: {direction}" /></label>
           <p className="field-note">Use {'{direction}'} to include the latest Direction node result.</p>
-          <label>Target<input value={data.target ?? ''} onChange={(event) => updateNodeData({ target: event.target.value })} placeholder="notify.mobile_app_phone" /></label>
+          <label>Title<input value={data.title ?? ''} onChange={(event) => updateNodeData({ title: event.target.value })} placeholder="Optional" /></label>
+          <label>Data JSON<textarea value={data.dataJson ?? '{}'} onChange={(event) => updateNodeData({ dataJson: event.target.value })} placeholder='{"priority": 0, "sound": "pushover"}' spellCheck="false" /></label>
         </>
       )}
       {data.kind === 'debug' && (
