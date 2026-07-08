@@ -504,6 +504,19 @@ async function walk(node, nodesById, edges, visited, options = {}) {
 async function executeNode(node, options = {}) {
   throwIfCancelled(options.signal)
   const data = node.data ?? {}
+  if (data.kind === 'time') {
+    const now = new Date()
+    const currentMinute = now.getHours() * 60 + now.getMinutes()
+    const match = await getScheduleMatch(node, now, currentMinute)
+    const scheduleText = formatScheduleForLog(data)
+    if (match.active) {
+      log('info', `${data.label || 'Schedule'} continued (${scheduleText}).`)
+      return true
+    }
+    log('warn', `${data.label || 'Schedule'} stopped; current time is outside ${scheduleText}.`)
+    return false
+  }
+
   if (data.kind === 'condition') {
     const rules = getConditionRules(data)
     const results = await Promise.all(rules.map(async (rule) => {
@@ -675,6 +688,13 @@ function minutesToTime(minutes) {
 function formatSchedulePointForLog(type, time) {
   const scheduleType = SCHEDULE_TIME_TYPES.has(type) ? type : 'time'
   return scheduleType === 'time' ? minutesToTime(parseTimeToMinutes(time) || 0) : scheduleType
+}
+
+function formatScheduleForLog(data) {
+  if (data.scheduleMode === 'between') {
+    return `between ${formatSchedulePointForLog(data.startType, data.startTime)} and ${formatSchedulePointForLog(data.endType, data.endTime)}`
+  }
+  return `time ${formatSchedulePointForLog(data.atType, data.at)}`
 }
 
 async function getSolarMinute(type, date) {

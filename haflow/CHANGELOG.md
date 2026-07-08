@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.36
+
+- Fix Schedule nodes so they also act as time gates when reached from another node, stopping downstream actions outside the configured time/day window.
+- Hide unused incoming handles on Trigger and Event nodes.
+
 ## 0.1.35
 
 - Add advanced Schedule node options for exact times, sunrise, sunset, time ranges, overnight ranges, and selected days of the week.

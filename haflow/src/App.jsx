@@ -340,6 +340,7 @@ function NodeBody({ data, selected }) {
   const runtimeStatus = data.runtimeStatus
   const disabled = data.disabled
   const summaryLines = summarizeNode(data)
+  const showTargetHandle = !['state', 'event'].includes(data.kind)
 
   if (data.kind === 'group') {
     return (
@@ -355,7 +356,7 @@ function NodeBody({ data, selected }) {
 
   return (
     <div className={`flow-node ${selected ? 'selected' : ''} ${validation ? 'invalid' : ''} ${runtimeStatus ? `runtime-${runtimeStatus}` : ''} ${disabled ? 'disabled' : ''}`} data-tooltip={catalogItem.description} style={{ '--node-color': catalogItem.color }} tabIndex={0}>
-      <Handle type="target" position={Position.Left} />
+      {showTargetHandle && <Handle type="target" position={Position.Left} />}
       <div className="node-header">
         <span className="node-icon"><Icon size={16} /></span>
         <span>{data.label || catalogItem.label}</span>
