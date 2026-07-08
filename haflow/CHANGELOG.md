@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.35
+
+- Add advanced Schedule node options for exact times, sunrise, sunset, time ranges, overnight ranges, and selected days of the week.
+- Make Schedule triggers evaluate ranges once when entering the active window, including ranges that cross midnight.
+- Add reusable GitHub push instructions so future commits include release notes, version bumps, validation, and PR/merge hygiene.
+
 ## 0.1.34
 
 - Add flow renaming with duplicate-name protection.
