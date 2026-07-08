@@ -1189,6 +1189,55 @@ textarea:focus {
   gap: 10px;
 }
 
+.schedule-editor {
+  display: grid;
+  gap: 10px;
+}
+
+.schedule-range,
+.schedule-point {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.weekday-picker {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.weekday-picker label {
+  display: grid;
+  min-width: 0;
+  margin: 0;
+}
+
+.weekday-picker input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.weekday-picker span {
+  display: grid;
+  min-height: 32px;
+  place-items: center;
+  padding: 0 4px;
+  color: #475569;
+  background: #ffffff;
+  border: 1px solid #d8e0e8;
+  border-radius: 7px;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.weekday-picker .selected span {
+  color: #ffffff;
+  background: #0f766e;
+  border-color: #0f766e;
+}
+
 .condition-rules {
   display: grid;
   gap: 10px;
