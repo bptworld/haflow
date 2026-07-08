@@ -34,6 +34,7 @@ import {
   Download,
   FilePlus,
   GitBranch,
+  GitMerge,
   History,
   Home,
   ListTree,
@@ -67,7 +68,7 @@ import './App.css'
 const ALL_ENTITY_AREAS = '__all_entity_areas__'
 const APP_VERSION = packageInfo.version
 const TARGETLESS_SERVICE_DOMAINS = new Set(['notify', 'persistent_notification'])
-const NODE_KINDS_REQUIRING_OUTGOING = new Set(['state', 'event', 'time', 'condition', 'or', 'direction', 'delay', 'wait'])
+const NODE_KINDS_REQUIRING_OUTGOING = new Set(['state', 'event', 'time', 'condition', 'or', 'and', 'direction', 'delay', 'wait'])
 const DIRECTION_ACTIVE_STATES = 'on, active, detected, open, occupied, home'
 const WEEKDAY_OPTIONS = [
   { value: 0, label: 'Sun' },
@@ -158,6 +159,14 @@ const nodeCatalog = [
     icon: Split,
     color: '#0891b2',
     data: { label: 'OR' },
+  },
+  {
+    type: 'and',
+    label: 'AND',
+    description: 'Continues only when every incoming trigger or condition is currently active.',
+    icon: GitMerge,
+    color: '#0369a1',
+    data: { activeStates: DIRECTION_ACTIVE_STATES, label: 'AND' },
   },
   {
     type: 'direction',
@@ -422,6 +431,7 @@ function summarizeNode(data) {
     return data.entityId ? formatConditionIntent(rules[0], entity) : 'Choose a condition'
   }
   if (data.kind === 'or') return 'Any incoming path continues'
+  if (data.kind === 'and') return 'All incoming paths must be active'
   if (data.kind === 'direction') {
     if (!data.entityA || !data.entityB) return 'Choose two entities'
     const target = data.targetEntityId ? ` -> ${data.targetEntityId}` : ''
@@ -786,7 +796,7 @@ function validateFlow(nodes, edges, entityById = new Map(), services = {}, isPau
       const entityIds = node.data.entityIds?.length ? node.data.entityIds : (node.data.entityId ? [node.data.entityId] : [])
       if (!entityIds.length && !TARGETLESS_SERVICE_DOMAINS.has(node.data.domain) && !String(node.data.payload || '').includes('entity_id')) issues.push(`${node.data?.label || node.id}: No target entity`)
     }
-    if (node.data?.kind === 'condition' && !incoming.get(node.id)) {
+    if (['condition', 'and'].includes(node.data?.kind) && !incoming.get(node.id)) {
       issues.push(`${node.data?.label || node.id}: No incoming link`)
     }
     if (NODE_KINDS_REQUIRING_OUTGOING.has(node.data?.kind) && !outgoing.get(node.id)) {
@@ -2728,6 +2738,12 @@ function Inspector({ entities, node, services, updateNodeData }) {
       )}
       {data.kind === 'condition' && (
         <ConditionRulesEditor data={data} entities={entities} updateNodeData={updateNodeData} />
+      )}
+      {data.kind === 'and' && (
+        <label>
+          Active states
+          <input value={data.activeStates ?? DIRECTION_ACTIVE_STATES} onChange={(event) => updateNodeData({ activeStates: event.target.value })} />
+        </label>
       )}
       {data.kind === 'delay' && (
         <label>Seconds<input min="0" value={data.seconds ?? 0} onChange={(event) => updateNodeData({ seconds: Number(event.target.value) })} type="number" /></label>

@@ -484,7 +484,7 @@ async function walk(node, nodesById, edges, visited, options = {}) {
   broadcastNodeState('start', node, { runId: options.runId })
   let shouldContinue = false
   try {
-    shouldContinue = options.skipStartExecution === node.id ? true : await executeNode(node, options)
+    shouldContinue = options.skipStartExecution === node.id ? true : await executeNode(node, { ...options, nodesById, edges })
     throwIfCancelled(options.signal)
   } finally {
     broadcastNodeState(shouldContinue ? 'finish' : 'stop', node, { runId: options.runId })
@@ -555,6 +555,12 @@ async function executeNode(node, options = {}) {
   if (data.kind === 'or') {
     log('info', `${data.label || 'OR'} continued.`)
     return true
+  }
+
+  if (data.kind === 'and') {
+    const passed = await evaluateAndNode(node, options)
+    log(passed ? 'info' : 'warn', `${data.label || 'AND'} ${passed ? 'continued' : 'stopped'}; ${passed ? 'all incoming sources are active' : 'not all incoming sources are active'}.`)
+    return passed
   }
 
   if (data.kind === 'direction') {
@@ -768,6 +774,75 @@ function cosDeg(value) { return Math.cos(value * Math.PI / 180) }
 function tanDeg(value) { return Math.tan(value * Math.PI / 180) }
 function acosDeg(value) { return Math.acos(value) * 180 / Math.PI }
 function atanDeg(value) { return Math.atan(value) * 180 / Math.PI }
+
+async function evaluateAndNode(node, options = {}) {
+  const incoming = (options.edges ?? []).filter((edge) => edge.target === node.id)
+  if (!incoming.length) return false
+
+  const sourceNodes = incoming.map((edge) => options.nodesById?.get(edge.source)).filter(Boolean)
+  if (!sourceNodes.length) return false
+
+  const activeStates = parseDirectionActiveStates(node.data?.activeStates)
+  const results = await Promise.all(sourceNodes.map((sourceNode) => evaluateAndSourceNode(sourceNode, activeStates)))
+  const detail = results.map((result) => `${result.label}: ${result.passed ? 'active' : result.reason}`).join(', ')
+  if (detail) log(results.every((result) => result.passed) ? 'info' : 'warn', `${node.data?.label || 'AND'} checked ${detail}.`)
+  return results.length > 0 && results.every((result) => result.passed)
+}
+
+async function evaluateAndSourceNode(sourceNode, activeStates) {
+  const data = sourceNode.data ?? {}
+  const label = data.label || sourceNode.id
+
+  if (data.disabled) return { label, passed: false, reason: 'disabled' }
+
+  if (data.kind === 'state') {
+    const rules = getStateTriggerRules(data).filter((rule) => rule.entityId)
+    if (!rules.length) return { label, passed: false, reason: 'no entity' }
+    const ruleResults = await Promise.all(rules.map((rule) => evaluateAndStateRule(rule, activeStates)))
+    return {
+      label,
+      passed: ruleResults.some((result) => result.passed),
+      reason: ruleResults.map((result) => result.reason).join(' or ') || 'inactive',
+    }
+  }
+
+  if (data.kind === 'condition') {
+    const rules = getConditionRules(data).filter((rule) => rule.entityId)
+    if (!rules.length) return { label, passed: false, reason: 'no condition' }
+    const ruleResults = await Promise.all(rules.map(evaluateAndConditionRule))
+    const passed = data.conditionMode === 'all'
+      ? ruleResults.every((result) => result.passed)
+      : ruleResults.some((result) => result.passed)
+    return {
+      label,
+      passed,
+      reason: ruleResults.map((result) => result.reason).join(data.conditionMode === 'all' ? ' and ' : ' or ') || 'failed',
+    }
+  }
+
+  return { label, passed: false, reason: 'not stateful' }
+}
+
+async function evaluateAndStateRule(rule, activeStates) {
+  const entity = await getEntity(rule.entityId).catch(() => null)
+  const actual = String(entity?.state ?? '')
+  const expected = String(rule.to ?? '')
+  if (expected && expected !== ANY_CHANGE) {
+    return { passed: actual === expected, reason: `${rule.entityId} is ${actual || 'unknown'}, expected ${expected}` }
+  }
+  return { passed: activeStates.has(actual.toLowerCase()), reason: `${rule.entityId} is ${actual || 'unknown'}` }
+}
+
+async function evaluateAndConditionRule(rule) {
+  const entity = await getEntity(rule.entityId).catch(() => null)
+  const actual = getEntityComparableValue(entity, rule.attribute)
+  const expected = String(rule.value ?? '')
+  const passed =
+    rule.operator === 'not_equals' ? actual !== expected :
+    rule.operator === 'contains' ? actual.includes(expected) :
+    actual === expected
+  return { passed, reason: `${rule.entityId} ${actual}${passed ? '=' : '!='}${expected}` }
+}
 
 async function resolveDirection(data) {
   if (!data.entityA || !data.entityB) throw new Error('Direction nodes need two entities.')
@@ -1936,6 +2011,13 @@ function normalizeNodeData(data, nodeId) {
       endType: cleanType(data.endType),
       endTime: data.endTime || '08:00',
       days,
+    }
+  }
+
+  if (data.kind === 'and') {
+    return {
+      ...data,
+      activeStates: String(data.activeStates || 'on, active, detected, open, occupied, home'),
     }
   }
 

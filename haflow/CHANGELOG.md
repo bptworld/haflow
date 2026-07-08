@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.38
+
+- Add an AND node that continues only when all incoming state triggers or condition nodes are currently active.
+- Let AND nodes use configurable active states when an incoming trigger does not have a specific `To` state.
+
 ## 0.1.37
 
 - Add a Direction node that compares two active entities, determines whether movement was A to B or B to A, and writes the result to an `input_text` or `input_select` helper.
