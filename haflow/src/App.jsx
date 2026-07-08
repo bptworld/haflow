@@ -67,6 +67,16 @@ const ALL_ENTITY_AREAS = '__all_entity_areas__'
 const APP_VERSION = packageInfo.version
 const TARGETLESS_SERVICE_DOMAINS = new Set(['notify', 'persistent_notification'])
 const NODE_KINDS_REQUIRING_OUTGOING = new Set(['state', 'event', 'time', 'condition', 'or', 'delay', 'wait'])
+const WEEKDAY_OPTIONS = [
+  { value: 0, label: 'Sun' },
+  { value: 1, label: 'Mon' },
+  { value: 2, label: 'Tue' },
+  { value: 3, label: 'Wed' },
+  { value: 4, label: 'Thu' },
+  { value: 5, label: 'Fri' },
+  { value: 6, label: 'Sat' },
+]
+const SCHEDULE_TIME_TYPES = ['time', 'sunrise', 'sunset']
 const BINARY_SENSOR_STATE_LABELS = {
   battery: { on: 'Low', off: 'Normal' },
   battery_charging: { on: 'Charging', off: 'Not Charging' },
@@ -129,7 +139,7 @@ const nodeCatalog = [
     description: 'Starts a flow at a specific time of day.',
     icon: Clock,
     color: '#b45309',
-    data: { at: '07:00', label: 'Schedule' },
+    data: { scheduleMode: 'at', atType: 'time', at: '07:00', days: [], label: 'Schedule' },
   },
   {
     type: 'condition',
@@ -394,7 +404,7 @@ function summarizeNode(data) {
     if (data.eventType === 'state_changed' && data.entityId) return formatTriggerIntent(data, entity)
     return data.eventType || 'Any event'
   }
-  if (data.kind === 'time') return `At ${data.at || '00:00'}`
+  if (data.kind === 'time') return formatScheduleSummary(data)
   if (data.kind === 'condition') {
     const rules = getConditionRules(data)
     if (rules.length > 1) return `${rules.length} ${data.conditionMode === 'all' ? 'AND' : 'OR'} conditions`
@@ -444,6 +454,32 @@ function formatServiceIntent(domain, service) {
     dismiss: `Dismiss ${domainLabel}`,
   }
   return serviceLabels[service] || `${formatAttributeName(service)} ${domainLabel}`
+}
+
+function getScheduleTimeType(data, field) {
+  const key = field === 'at' ? 'atType' : `${field}Type`
+  return SCHEDULE_TIME_TYPES.includes(data[key]) ? data[key] : 'time'
+}
+
+function formatSchedulePoint(data, field) {
+  const type = getScheduleTimeType(data, field)
+  if (type === 'sunrise') return 'sunrise'
+  if (type === 'sunset') return 'sunset'
+  const key = field === 'at' ? 'at' : `${field}Time`
+  return data[key] || '00:00'
+}
+
+function formatScheduleDays(days) {
+  if (!Array.isArray(days) || !days.length || days.length === 7) return ''
+  const selected = new Set(days.map(Number))
+  return WEEKDAY_OPTIONS.filter((day) => selected.has(day.value)).map((day) => day.label).join(', ')
+}
+
+function formatScheduleSummary(data) {
+  const days = formatScheduleDays(data.days)
+  const suffix = days ? ` (${days})` : ''
+  if (data.scheduleMode === 'between') return `Between ${formatSchedulePoint(data, 'start')} and ${formatSchedulePoint(data, 'end')}${suffix}`
+  return `At ${formatSchedulePoint(data, 'at')}${suffix}`
 }
 
 function formatDomainName(domain) {
@@ -669,7 +705,14 @@ function validateNodeData(data, entityById = new Map(), services = {}) {
     if (rules.some((rule) => rule.entityId && !entityExists(rule.entityId))) return 'Entity not found'
   }
   if (data.kind === 'event' && data.entityId && !entityExists(data.entityId)) return 'Entity not found'
-  if (data.kind === 'time' && !data.at) return 'Missing time'
+  if (data.kind === 'time') {
+    const mode = data.scheduleMode === 'between' ? 'between' : 'at'
+    if (mode === 'at' && getScheduleTimeType(data, 'at') === 'time' && !data.at) return 'Missing time'
+    if (mode === 'between') {
+      if (getScheduleTimeType(data, 'start') === 'time' && !data.startTime) return 'Missing start'
+      if (getScheduleTimeType(data, 'end') === 'time' && !data.endTime) return 'Missing end'
+    }
+  }
   if (data.kind === 'condition') {
     const rules = getConditionRules(data)
     if (!rules.length || rules.some((rule) => !rule.entityId)) return 'Missing entity'
@@ -2405,6 +2448,30 @@ function StateValueSelect({ entity, options, placeholder, value, onChange }) {
   )
 }
 
+function SchedulePointEditor({ data, field, label, updateNodeData }) {
+  const typeKey = field === 'at' ? 'atType' : `${field}Type`
+  const timeKey = field === 'at' ? 'at' : `${field}Time`
+  const type = getScheduleTimeType(data, field)
+  return (
+    <div className="schedule-point">
+      <label>
+        {label}
+        <select value={type} onChange={(event) => updateNodeData({ [typeKey]: event.target.value })}>
+          <option value="time">Time</option>
+          <option value="sunrise">Sunrise</option>
+          <option value="sunset">Sunset</option>
+        </select>
+      </label>
+      {type === 'time' && (
+        <label>
+          Time
+          <input value={data[timeKey] ?? ''} onChange={(event) => updateNodeData({ [timeKey]: event.target.value })} type="time" />
+        </label>
+      )}
+    </div>
+  )
+}
+
 function Inspector({ entities, node, services, updateNodeData }) {
   const data = node.data
   const selectedEntity = entities.find((entity) => entity.entity_id === data.entityId)
@@ -2468,6 +2535,13 @@ function Inspector({ entities, node, services, updateNodeData }) {
   const clearEntity = () => {
     if (data.kind === 'event') updateNodeData({ entityId: '', from: '', to: '', label: getCatalogLabel(data.kind) })
     else updateNodeData({ entityId: '', attribute: 'state', to: '', value: '', label: getCatalogLabel(data.kind) })
+  }
+  const updateScheduleDay = (day, selected) => {
+    const currentDays = data.days?.length ? data.days : WEEKDAY_OPTIONS.map((option) => option.value)
+    const current = new Set(currentDays.map(Number))
+    if (selected) current.add(day)
+    else current.delete(day)
+    updateNodeData({ days: Array.from(current).sort((first, second) => first - second) })
   }
 
   return (
@@ -2542,7 +2616,35 @@ function Inspector({ entities, node, services, updateNodeData }) {
         </>
       )}
       {data.kind === 'time' && (
-        <label>At<input value={data.at ?? ''} onChange={(event) => updateNodeData({ at: event.target.value })} type="time" /></label>
+        <div className="schedule-editor">
+          <label>
+            Mode
+            <select value={data.scheduleMode === 'between' ? 'between' : 'at'} onChange={(event) => updateNodeData({ scheduleMode: event.target.value })}>
+              <option value="at">At a time</option>
+              <option value="between">Between times</option>
+            </select>
+          </label>
+          {data.scheduleMode === 'between' ? (
+            <div className="schedule-range">
+              <SchedulePointEditor data={data} field="start" label="Start" updateNodeData={updateNodeData} />
+              <SchedulePointEditor data={data} field="end" label="End" updateNodeData={updateNodeData} />
+            </div>
+          ) : (
+            <SchedulePointEditor data={data} field="at" label="At" updateNodeData={updateNodeData} />
+          )}
+          <div className="weekday-picker" role="group" aria-label="Days of week">
+            {WEEKDAY_OPTIONS.map((day) => {
+              const selectedDays = data.days ?? []
+              const checked = !selectedDays.length || selectedDays.map(Number).includes(day.value)
+              return (
+                <label key={day.value} className={checked ? 'selected' : ''}>
+                  <input checked={checked} onChange={(event) => updateScheduleDay(day.value, event.target.checked)} type="checkbox" />
+                  <span>{day.label}</span>
+                </label>
+              )
+            })}
+          </div>
+        </div>
       )}
       {data.kind === 'condition' && (
         <ConditionRulesEditor data={data} entities={entities} updateNodeData={updateNodeData} />

@@ -27,6 +27,8 @@ let haSocket = null
 let haMessageId = 1
 let reconnectTimer = null
 let lastTimeKey = ''
+let activeScheduleWindows = new Set()
+let haConfigCache = null
 let runningTriggers = new Map()
 let manualRun = null
 let nodeRuntime = new Map()
@@ -40,6 +42,7 @@ let deviceRegistryById = new Map()
 let entityRegistryDeviceByEntityId = new Map()
 const ANY_CHANGE = '__changed__'
 const LUTRON_5_BUTTON_PICO_BUTTONS = [1, 2, 5, 3, 4]
+const SCHEDULE_TIME_TYPES = new Set(['time', 'sunrise', 'sunset'])
 
 app.use(express.json({ limit: '10mb' }))
 
@@ -588,14 +591,155 @@ async function fireTimeTriggers() {
   if (key === lastTimeKey) return
   lastTimeKey = key
 
-  const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
+  const currentMinute = now.getHours() * 60 + now.getMinutes()
+  const currentTime = minutesToTime(currentMinute)
+  const nextActiveWindows = new Set()
   for (const entry of await getRunnableFlowEntries()) {
-    const matches = entry.flow.nodes.filter((node) => !node.data?.disabled && node.data?.kind === 'time' && node.data?.at === currentTime)
-    for (const node of matches) {
-      triggerNode(entry.flow, entry.meta, node, { reason: `time ${currentTime}` }).catch((error) => log('error', error.message))
+    const timeNodes = entry.flow.nodes.filter((node) => !node.data?.disabled && node.data?.kind === 'time')
+    for (const node of timeNodes) {
+      const match = await getScheduleMatch(node, now, currentMinute)
+      if (!match.active) continue
+      if (match.windowKey) {
+        nextActiveWindows.add(match.windowKey)
+        if (activeScheduleWindows.has(match.windowKey)) continue
+      }
+      triggerNode(entry.flow, entry.meta, node, { reason: match.reason || `time ${currentTime}` }).catch((error) => log('error', error.message))
     }
   }
+  activeScheduleWindows = nextActiveWindows
 }
+
+async function getScheduleMatch(node, now, currentMinute) {
+  const data = node.data ?? {}
+
+  if (data.scheduleMode === 'between') {
+    const start = await resolveScheduleMinute(data.startType, data.startTime, now)
+    const end = await resolveScheduleMinute(data.endType, data.endTime, now)
+    if (!Number.isFinite(start) || !Number.isFinite(end)) return { active: false }
+    if (!isScheduleDayEnabled(data.days, now, currentMinute, start, end)) return { active: false }
+    const active = minuteIsInRange(currentMinute, start, end)
+    if (!active) return { active: false }
+    const windowDate = getScheduleWindowDate(now, currentMinute, start, end)
+    return {
+      active: true,
+      reason: `between ${formatSchedulePointForLog(data.startType, data.startTime)} and ${formatSchedulePointForLog(data.endType, data.endTime)}`,
+      windowKey: `${windowDate}-${node.id}-${start}-${end}`,
+    }
+  }
+
+  if (!isScheduleDayEnabled(data.days, now, currentMinute)) return { active: false }
+  const at = await resolveScheduleMinute(data.atType, data.at, now)
+  if (!Number.isFinite(at) || at !== currentMinute) return { active: false }
+  return { active: true, reason: `time ${formatSchedulePointForLog(data.atType, data.at)}` }
+}
+
+function isScheduleDayEnabled(scheduleDays, now, currentMinute, start = NaN, end = NaN) {
+  const days = Array.isArray(scheduleDays) ? scheduleDays.map(Number).filter((day) => day >= 0 && day <= 6) : []
+  if (!days.length || days.length === 7) return true
+  let day = now.getDay()
+  if (Number.isFinite(start) && Number.isFinite(end) && start > end && currentMinute < end) day = (day + 6) % 7
+  return days.includes(day)
+}
+
+function getScheduleWindowDate(now, currentMinute, start, end) {
+  const date = new Date(now)
+  if (start > end && currentMinute < end) date.setDate(date.getDate() - 1)
+  return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`
+}
+
+function minuteIsInRange(currentMinute, start, end) {
+  if (start === end) return currentMinute === start
+  if (start < end) return currentMinute >= start && currentMinute < end
+  return currentMinute >= start || currentMinute < end
+}
+
+async function resolveScheduleMinute(type, time, date) {
+  const scheduleType = SCHEDULE_TIME_TYPES.has(type) ? type : 'time'
+  if (scheduleType === 'time') return parseTimeToMinutes(time)
+  return getSolarMinute(scheduleType, date)
+}
+
+function parseTimeToMinutes(time) {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(String(time || ''))
+  if (!match) return NaN
+  const hours = Number(match[1])
+  const minutes = Number(match[2])
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return NaN
+  return hours * 60 + minutes
+}
+
+function minutesToTime(minutes) {
+  return `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`
+}
+
+function formatSchedulePointForLog(type, time) {
+  const scheduleType = SCHEDULE_TIME_TYPES.has(type) ? type : 'time'
+  return scheduleType === 'time' ? minutesToTime(parseTimeToMinutes(time) || 0) : scheduleType
+}
+
+async function getSolarMinute(type, date) {
+  const haConfig = await getHomeAssistantConfig()
+  const latitude = Number(haConfig?.latitude)
+  const longitude = Number(haConfig?.longitude)
+  if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+    return calculateSolarMinute(type, date, latitude, longitude)
+  }
+
+  const sun = await getEntity('sun.sun').catch(() => null)
+  const attribute = type === 'sunrise' ? 'next_rising' : 'next_setting'
+  const value = sun?.attributes?.[attribute]
+  const eventDate = value ? new Date(value) : null
+  if (!eventDate || Number.isNaN(eventDate.getTime())) return NaN
+  return eventDate.getHours() * 60 + eventDate.getMinutes()
+}
+
+async function getHomeAssistantConfig() {
+  if (haConfigCache) return haConfigCache
+  haConfigCache = await haRest('/api/config').catch(() => ({}))
+  return haConfigCache
+}
+
+function calculateSolarMinute(type, date, latitude, longitude) {
+  const zenith = 90.833
+  const day = dayOfYear(date)
+  const longitudeHour = longitude / 15
+  const approximateTime = day + ((type === 'sunrise' ? 6 : 18) - longitudeHour) / 24
+  const meanAnomaly = (0.9856 * approximateTime) - 3.289
+  const trueLongitude = normalizeDegrees(meanAnomaly + (1.916 * sinDeg(meanAnomaly)) + (0.020 * sinDeg(2 * meanAnomaly)) + 282.634)
+  let rightAscension = normalizeDegrees(atanDeg(0.91764 * tanDeg(trueLongitude)))
+  rightAscension += Math.floor(trueLongitude / 90) * 90 - Math.floor(rightAscension / 90) * 90
+  rightAscension /= 15
+
+  const sinDec = 0.39782 * sinDeg(trueLongitude)
+  const cosDec = Math.cos(Math.asin(sinDec))
+  const cosHour = (cosDeg(zenith) - (sinDec * sinDeg(latitude))) / (cosDec * cosDeg(latitude))
+  if (cosHour > 1 || cosHour < -1) return NaN
+
+  const hour = (type === 'sunrise' ? 360 - acosDeg(cosHour) : acosDeg(cosHour)) / 15
+  const localMeanTime = hour + rightAscension - (0.06571 * approximateTime) - 6.622
+  const utcHour = normalizeHours(localMeanTime - longitudeHour)
+  const eventDate = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate(), 0, Math.round(utcHour * 60)))
+  return eventDate.getHours() * 60 + eventDate.getMinutes()
+}
+
+function dayOfYear(date) {
+  const start = new Date(date.getFullYear(), 0, 0)
+  return Math.floor((date - start) / 86_400_000)
+}
+
+function normalizeDegrees(value) {
+  return ((value % 360) + 360) % 360
+}
+
+function normalizeHours(value) {
+  return ((value % 24) + 24) % 24
+}
+
+function sinDeg(value) { return Math.sin(value * Math.PI / 180) }
+function cosDeg(value) { return Math.cos(value * Math.PI / 180) }
+function tanDeg(value) { return Math.tan(value * Math.PI / 180) }
+function acosDeg(value) { return Math.acos(value) * 180 / Math.PI }
+function atanDeg(value) { return Math.atan(value) * 180 / Math.PI }
 
 async function handleHomeAssistantEvent(event) {
   if (!event?.event_type) return
@@ -1590,7 +1734,7 @@ function createContactNotificationFlow() {
 function createScheduledSceneFlow() {
   return {
     nodes: [
-      { id: 'starter-evening-time', type: 'haflow', position: { x: 80, y: 100 }, data: { kind: 'time', label: 'Every Evening', at: '19:00' } },
+      { id: 'starter-evening-time', type: 'haflow', position: { x: 80, y: 100 }, data: { kind: 'time', label: 'Every Evening', scheduleMode: 'at', atType: 'time', at: '19:00', days: [] } },
       { id: 'starter-evening-scene', type: 'haflow', position: { x: 390, y: 100 }, data: { kind: 'scene', label: 'Turn On Scene', entityId: 'scene.example_evening' } },
     ],
     edges: [{ id: 'starter-evening-edge', source: 'starter-evening-time', target: 'starter-evening-scene', animated: true }],
@@ -1695,6 +1839,25 @@ function normalizeNodeData(data, nodeId) {
       entityIds,
       entityId: entityIds[0] ?? data.entityId ?? '',
       payload: data.payload ?? '{}',
+    }
+  }
+
+  if (data.kind === 'time') {
+    const scheduleMode = data.scheduleMode === 'between' ? 'between' : 'at'
+    const cleanType = (value) => SCHEDULE_TIME_TYPES.has(value) ? value : 'time'
+    const days = Array.isArray(data.days)
+      ? Array.from(new Set(data.days.map(Number).filter((day) => day >= 0 && day <= 6))).sort((first, second) => first - second)
+      : []
+    return {
+      ...data,
+      scheduleMode,
+      atType: cleanType(data.atType),
+      at: data.at || '07:00',
+      startType: cleanType(data.startType),
+      startTime: data.startTime || data.at || '07:00',
+      endType: cleanType(data.endType),
+      endTime: data.endTime || '08:00',
+      days,
     }
   }
 
