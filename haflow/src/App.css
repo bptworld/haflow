@@ -736,11 +736,30 @@ textarea:focus {
   border-left: 5px solid var(--node-color);
   border-radius: 8px;
   box-shadow: 0 8px 22px rgba(15, 23, 42, 0.08);
+  transition: background 160ms ease, border-color 160ms ease, box-shadow 160ms ease, outline-color 160ms ease;
+}
+
+.flow-node.selected,
+.flow-node.runtime-active {
+  outline: 3px solid transparent;
+  outline-offset: 3px;
+}
+
+.flow-node.selected .node-header,
+.flow-node.runtime-active .node-header {
+  color: #0f172a;
+}
+
+.flow-node.selected .node-icon,
+.flow-node.runtime-active .node-icon {
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.92), 0 0 0 6px color-mix(in srgb, var(--node-color) 34%, transparent);
 }
 
 .flow-node.runtime-active {
   border-color: #2563eb;
-  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.15), 0 14px 32px rgba(37, 99, 235, 0.15);
+  outline-color: rgba(37, 99, 235, 0.36);
+  background: linear-gradient(180deg, #eff6ff 0%, #ffffff 72%);
+  box-shadow: 0 0 0 7px rgba(37, 99, 235, 0.18), 0 18px 42px rgba(37, 99, 235, 0.28);
   animation: runtime-pulse 1.1s ease-in-out infinite;
 }
 
@@ -756,7 +775,15 @@ textarea:focus {
 
 .flow-node.selected {
   border-color: #0f766e;
-  box-shadow: 0 0 0 4px rgba(15, 118, 110, 0.13), 0 12px 30px rgba(15, 23, 42, 0.12);
+  outline-color: rgba(15, 118, 110, 0.44);
+  background: linear-gradient(180deg, #ecfdf5 0%, #ffffff 74%);
+  box-shadow: 0 0 0 7px rgba(15, 118, 110, 0.18), 0 16px 38px rgba(15, 23, 42, 0.18);
+}
+
+.flow-node.selected.runtime-active {
+  border-color: #2563eb;
+  outline-color: rgba(37, 99, 235, 0.48);
+  box-shadow: 0 0 0 7px rgba(37, 99, 235, 0.2), 0 0 0 13px rgba(15, 118, 110, 0.14), 0 20px 46px rgba(37, 99, 235, 0.28);
 }
 
 .flow-node.invalid {
@@ -782,7 +809,10 @@ textarea:focus {
 
 .group-node.selected {
   border-color: #0f766e;
-  box-shadow: 0 0 0 4px rgba(15, 118, 110, 0.12), inset 0 0 0 1px rgba(255, 255, 255, 0.7);
+  outline: 3px solid rgba(15, 118, 110, 0.42);
+  outline-offset: 3px;
+  background: rgba(236, 253, 245, 0.72);
+  box-shadow: 0 0 0 7px rgba(15, 118, 110, 0.18), inset 0 0 0 1px rgba(255, 255, 255, 0.7);
 }
 
 .group-node-title {
@@ -887,12 +917,15 @@ textarea:focus {
 .node-runtime {
   display: inline-flex;
   margin-top: 8px;
-  padding: 3px 6px;
+  padding: 4px 8px;
   color: #1d4ed8;
-  background: #eff6ff;
+  background: #dbeafe;
+  border: 1px solid #93c5fd;
   border-radius: 5px;
   font-size: 11px;
-  font-weight: 800;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .runtime-done .node-runtime {
@@ -908,11 +941,11 @@ textarea:focus {
 @keyframes runtime-pulse {
   0%,
   100% {
-    transform: translateY(0);
+    box-shadow: 0 0 0 7px rgba(37, 99, 235, 0.18), 0 18px 42px rgba(37, 99, 235, 0.28);
   }
 
   50% {
-    transform: translateY(-2px);
+    box-shadow: 0 0 0 10px rgba(37, 99, 235, 0.24), 0 22px 48px rgba(37, 99, 235, 0.34);
   }
 }
 
@@ -1959,6 +1992,23 @@ textarea:focus {
   box-shadow: 0 14px 32px rgba(0, 0, 0, 0.28);
 }
 
+.theme-dark .flow-node.selected .node-header,
+.theme-dark .flow-node.runtime-active .node-header {
+  color: #f8fafc;
+}
+
+.theme-dark .flow-node.selected .node-icon,
+.theme-dark .flow-node.runtime-active .node-icon {
+  box-shadow: 0 0 0 3px rgba(15, 23, 42, 0.95), 0 0 0 6px color-mix(in srgb, var(--node-color) 48%, transparent);
+}
+
+.theme-dark .flow-node.runtime-active {
+  border-color: #60a5fa;
+  outline-color: rgba(96, 165, 250, 0.52);
+  background: linear-gradient(180deg, rgba(37, 99, 235, 0.28) 0%, #1e293b 72%);
+  box-shadow: 0 0 0 7px rgba(96, 165, 250, 0.2), 0 18px 44px rgba(37, 99, 235, 0.34);
+}
+
 .theme-dark .flow-node.runtime-done,
 .theme-dark .entity-list button.selected,
 .theme-dark .selected-entities button {
@@ -1975,7 +2025,15 @@ textarea:focus {
 
 .theme-dark .flow-node.selected {
   border-color: #5eead4;
-  box-shadow: 0 0 0 4px rgba(94, 234, 212, 0.16), 0 14px 32px rgba(0, 0, 0, 0.32);
+  outline-color: rgba(94, 234, 212, 0.52);
+  background: linear-gradient(180deg, rgba(20, 184, 166, 0.24) 0%, #1e293b 74%);
+  box-shadow: 0 0 0 7px rgba(94, 234, 212, 0.2), 0 18px 42px rgba(0, 0, 0, 0.38);
+}
+
+.theme-dark .flow-node.selected.runtime-active {
+  border-color: #60a5fa;
+  outline-color: rgba(96, 165, 250, 0.56);
+  box-shadow: 0 0 0 7px rgba(96, 165, 250, 0.22), 0 0 0 13px rgba(94, 234, 212, 0.14), 0 20px 48px rgba(37, 99, 235, 0.38);
 }
 
 .theme-dark .group-node {
@@ -1988,6 +2046,13 @@ textarea:focus {
   color: #e5e7eb;
   background: rgba(15, 23, 42, 0.86);
   border-color: #334155;
+}
+
+.theme-dark .group-node.selected {
+  border-color: #5eead4;
+  outline-color: rgba(94, 234, 212, 0.52);
+  background: rgba(20, 184, 166, 0.18);
+  box-shadow: 0 0 0 7px rgba(94, 234, 212, 0.18), inset 0 0 0 1px rgba(148, 163, 184, 0.14);
 }
 
 .theme-dark .group-node-device {
@@ -2010,7 +2075,8 @@ textarea:focus {
 
 .theme-dark .node-runtime {
   color: #bfdbfe;
-  background: rgba(37, 99, 235, 0.2);
+  background: rgba(37, 99, 235, 0.3);
+  border-color: rgba(147, 197, 253, 0.44);
 }
 
 .theme-dark .runtime-done .node-runtime {
