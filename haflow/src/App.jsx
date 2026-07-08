@@ -70,6 +70,40 @@ const APP_VERSION = packageInfo.version
 const TARGETLESS_SERVICE_DOMAINS = new Set(['notify', 'persistent_notification'])
 const NODE_KINDS_REQUIRING_OUTGOING = new Set(['state', 'event', 'time', 'condition', 'or', 'and', 'direction', 'delay', 'wait'])
 const DIRECTION_ACTIVE_STATES = 'on, active, detected, open, occupied, home'
+const PUSHOVER_PRIORITIES = [
+  { value: '', label: 'Normal' },
+  { value: '-2', label: 'Lowest' },
+  { value: '-1', label: 'Low' },
+  { value: '0', label: 'Normal' },
+  { value: '1', label: 'High' },
+  { value: '2', label: 'Emergency' },
+]
+const PUSHOVER_SOUNDS = [
+  '',
+  'pushover',
+  'bike',
+  'bugle',
+  'cashregister',
+  'classical',
+  'cosmic',
+  'falling',
+  'gamelan',
+  'incoming',
+  'intermission',
+  'magic',
+  'mechanical',
+  'pianobar',
+  'siren',
+  'spacealarm',
+  'tugboat',
+  'alien',
+  'climb',
+  'persistent',
+  'echo',
+  'updown',
+  'vibrate',
+  'none',
+]
 const WEEKDAY_OPTIONS = [
   { value: 0, label: 'Sun' },
   { value: 1, label: 'Mon' },
@@ -222,7 +256,7 @@ const nodeCatalog = [
     description: 'Sends a Home Assistant notification message. Use {direction} after a Direction node.',
     icon: Bell,
     color: '#be123c',
-    data: { message: 'HAFlow ran', notifyService: '', target: '', title: '', dataJson: '{}', label: 'Notify' },
+    data: { message: 'HAFlow ran', notifyService: '', target: '', title: '', dataJson: '{}', pushoverPriority: '', pushoverSound: '', label: 'Notify' },
   },
   {
     type: 'scene',
@@ -2557,6 +2591,8 @@ function Inspector({ entities, node, services, updateNodeData }) {
   const notifyServiceNames = services.notify ? Object.keys(services.notify).sort() : []
   const notifyTarget = data.notifyService || data.target || ''
   const notifyUsesCustomTarget = data.kind === 'notify' && notifyTarget && !notifyServiceNames.includes(notifyTarget)
+  const notifyServiceKey = String(notifyTarget || 'notify').replace(/^notify\./, '')
+  const notifyIsPushover = data.kind === 'notify' && notifyServiceKey.toLowerCase().includes('pushover')
   const domainOptions = Object.keys(services).sort()
   const serviceNames = data.domain && services[data.domain] ? Object.keys(services[data.domain]).sort() : []
 
@@ -2813,6 +2849,24 @@ function Inspector({ entities, node, services, updateNodeData }) {
           <label>Message<input value={data.message ?? ''} onChange={(event) => updateNodeData({ message: event.target.value })} placeholder="Driveway motion: {direction}" /></label>
           <p className="field-note">Use {'{direction}'} to include the latest Direction node result.</p>
           <label>Title<input value={data.title ?? ''} onChange={(event) => updateNodeData({ title: event.target.value })} placeholder="Optional" /></label>
+          {notifyIsPushover && (
+            <div className="notify-service-options">
+              <div className="field-grid">
+                <label>
+                  Pushover priority
+                  <select value={data.pushoverPriority ?? ''} onChange={(event) => updateNodeData({ pushoverPriority: event.target.value })}>
+                    {PUSHOVER_PRIORITIES.map((priority) => <option key={`${priority.value}-${priority.label}`} value={priority.value}>{priority.label}</option>)}
+                  </select>
+                </label>
+                <label>
+                  Pushover sound
+                  <select value={data.pushoverSound ?? ''} onChange={(event) => updateNodeData({ pushoverSound: event.target.value })}>
+                    {PUSHOVER_SOUNDS.map((sound) => <option key={sound || 'default'} value={sound}>{sound || 'Default'}</option>)}
+                  </select>
+                </label>
+              </div>
+            </div>
+          )}
           <label>Data JSON<textarea value={data.dataJson ?? '{}'} onChange={(event) => updateNodeData({ dataJson: event.target.value })} placeholder='{"priority": 0, "sound": "pushover"}' spellCheck="false" /></label>
         </>
       )}

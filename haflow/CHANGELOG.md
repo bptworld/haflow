@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.41
+
+- Show Pushover priority and sound dropdowns when a Pushover notify service is selected.
+- Merge selected Pushover options into the Notify data payload automatically.
+
 ## 0.1.40
 
 - Make Notify nodes easier to configure by selecting available Home Assistant notify services from a dropdown.

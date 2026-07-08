@@ -599,6 +599,7 @@ async function executeNode(node, options = {}) {
     const payload = { message }
     if (data.title) payload.title = renderRunMessage(data.title, options.context)
     const notifyData = parseNotifyData(data.dataJson)
+    applyPushoverNotifyOptions(data, notifyData)
     if (notifyData && Object.keys(notifyData).length) payload.data = notifyData
     await callService('notify', service || 'notify', payload)
     log('info', `Sent notification via notify.${service || 'notify'}.`)
@@ -918,6 +919,13 @@ function parseNotifyData(dataJson) {
   if (!dataJson || !String(dataJson).trim()) return {}
   const parsed = JSON.parse(dataJson)
   return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
+}
+
+function applyPushoverNotifyOptions(data, notifyData) {
+  const target = normalizeNotifyTarget(data).toLowerCase()
+  if (!target.includes('pushover')) return
+  if (data.pushoverPriority !== undefined && data.pushoverPriority !== '') notifyData.priority = Number(data.pushoverPriority)
+  if (data.pushoverSound) notifyData.sound = String(data.pushoverSound)
 }
 
 async function handleHomeAssistantEvent(event) {
@@ -2067,6 +2075,8 @@ function normalizeNodeData(data, nodeId) {
       notifyService: String(data.notifyService || target.replace(/^notify\./, '') || ''),
       title: String(data.title ?? ''),
       dataJson: data.dataJson ?? '{}',
+      pushoverPriority: data.pushoverPriority ?? '',
+      pushoverSound: data.pushoverSound ?? '',
     }
   }
 

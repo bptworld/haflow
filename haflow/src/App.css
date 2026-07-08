@@ -1206,6 +1206,12 @@ textarea:focus {
   gap: 10px;
 }
 
+.notify-service-options {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
 .schedule-range,
 .schedule-point {
   display: grid;
