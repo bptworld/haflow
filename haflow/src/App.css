@@ -1194,6 +1194,11 @@ textarea:focus {
   gap: 10px;
 }
 
+.direction-editor {
+  display: grid;
+  gap: 10px;
+}
+
 .schedule-range,
 .schedule-point {
   display: grid;

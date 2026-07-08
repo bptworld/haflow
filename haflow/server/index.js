@@ -557,6 +557,14 @@ async function executeNode(node, options = {}) {
     return true
   }
 
+  if (data.kind === 'direction') {
+    const direction = await resolveDirection(data)
+    if (!direction) return false
+    await writeDirectionTarget(data.targetEntityId, direction)
+    log('info', `${data.label || 'Direction'} resolved ${direction} and saved to ${data.targetEntityId}.`)
+    return true
+  }
+
   if (data.kind === 'end') {
     return true
   }
@@ -760,6 +768,56 @@ function cosDeg(value) { return Math.cos(value * Math.PI / 180) }
 function tanDeg(value) { return Math.tan(value * Math.PI / 180) }
 function acosDeg(value) { return Math.acos(value) * 180 / Math.PI }
 function atanDeg(value) { return Math.atan(value) * 180 / Math.PI }
+
+async function resolveDirection(data) {
+  if (!data.entityA || !data.entityB) throw new Error('Direction nodes need two entities.')
+  if (!data.targetEntityId) throw new Error('Direction nodes need an input_text or input_select target helper.')
+
+  const [entityA, entityB] = await Promise.all([getEntity(data.entityA), getEntity(data.entityB)])
+  const activeStates = parseDirectionActiveStates(data.activeStates)
+  if (!directionEntityIsActive(entityA, activeStates) || !directionEntityIsActive(entityB, activeStates)) {
+    log('warn', `${data.label || 'Direction'} stopped; both entities are not active.`)
+    return ''
+  }
+
+  const timeA = directionEntityChangedAt(entityA)
+  const timeB = directionEntityChangedAt(entityB)
+  if (!Number.isFinite(timeA) || !Number.isFinite(timeB) || timeA === timeB) {
+    log('warn', `${data.label || 'Direction'} stopped; entity order could not be determined.`)
+    return ''
+  }
+
+  return timeA < timeB ? String(data.directionAB || 'in') : String(data.directionBA || 'out')
+}
+
+function parseDirectionActiveStates(activeStates) {
+  return new Set(String(activeStates || 'on, active, detected, open, occupied, home')
+    .split(',')
+    .map((state) => state.trim().toLowerCase())
+    .filter(Boolean))
+}
+
+function directionEntityIsActive(entity, activeStates) {
+  return activeStates.has(String(entity?.state ?? '').toLowerCase())
+}
+
+function directionEntityChangedAt(entity) {
+  const time = Date.parse(entity?.last_changed || entity?.last_updated || '')
+  return Number.isNaN(time) ? NaN : time
+}
+
+async function writeDirectionTarget(targetEntityId, direction) {
+  const domain = String(targetEntityId || '').split('.')[0]
+  if (domain === 'input_text') {
+    await callService('input_text', 'set_value', { entity_id: targetEntityId, value: direction })
+    return
+  }
+  if (domain === 'input_select') {
+    await callService('input_select', 'select_option', { entity_id: targetEntityId, option: direction })
+    return
+  }
+  throw new Error('Direction target must be an input_text or input_select helper.')
+}
 
 async function handleHomeAssistantEvent(event) {
   if (!event?.event_type) return
@@ -1878,6 +1936,18 @@ function normalizeNodeData(data, nodeId) {
       endType: cleanType(data.endType),
       endTime: data.endTime || '08:00',
       days,
+    }
+  }
+
+  if (data.kind === 'direction') {
+    return {
+      ...data,
+      entityA: String(data.entityA ?? ''),
+      entityB: String(data.entityB ?? ''),
+      activeStates: String(data.activeStates || 'on, active, detected, open, occupied, home'),
+      directionAB: String(data.directionAB || 'in'),
+      directionBA: String(data.directionBA || 'out'),
+      targetEntityId: String(data.targetEntityId ?? ''),
     }
   }
 

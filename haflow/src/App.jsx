@@ -23,6 +23,7 @@ import {
   AlignVerticalJustifyCenter,
   AlignVerticalJustifyEnd,
   AlignVerticalJustifyStart,
+  ArrowRightLeft,
   Bell,
   Cable,
   Check,
@@ -66,7 +67,8 @@ import './App.css'
 const ALL_ENTITY_AREAS = '__all_entity_areas__'
 const APP_VERSION = packageInfo.version
 const TARGETLESS_SERVICE_DOMAINS = new Set(['notify', 'persistent_notification'])
-const NODE_KINDS_REQUIRING_OUTGOING = new Set(['state', 'event', 'time', 'condition', 'or', 'delay', 'wait'])
+const NODE_KINDS_REQUIRING_OUTGOING = new Set(['state', 'event', 'time', 'condition', 'or', 'direction', 'delay', 'wait'])
+const DIRECTION_ACTIVE_STATES = 'on, active, detected, open, occupied, home'
 const WEEKDAY_OPTIONS = [
   { value: 0, label: 'Sun' },
   { value: 1, label: 'Mon' },
@@ -156,6 +158,14 @@ const nodeCatalog = [
     icon: Split,
     color: '#0891b2',
     data: { label: 'OR' },
+  },
+  {
+    type: 'direction',
+    label: 'Direction',
+    description: 'Compares two active entities and writes whether movement went A to B or B to A.',
+    icon: ArrowRightLeft,
+    color: '#7c2d12',
+    data: { entityA: '', entityB: '', activeStates: DIRECTION_ACTIVE_STATES, directionAB: 'in', directionBA: 'out', targetEntityId: '', label: 'Direction' },
   },
   {
     type: 'group',
@@ -412,6 +422,11 @@ function summarizeNode(data) {
     return data.entityId ? formatConditionIntent(rules[0], entity) : 'Choose a condition'
   }
   if (data.kind === 'or') return 'Any incoming path continues'
+  if (data.kind === 'direction') {
+    if (!data.entityA || !data.entityB) return 'Choose two entities'
+    const target = data.targetEntityId ? ` -> ${data.targetEntityId}` : ''
+    return `${data.directionAB || 'in'} / ${data.directionBA || 'out'}${target}`
+  }
   if (data.kind === 'delay') return `Wait ${data.seconds || 0}s`
   if (data.kind === 'wait') return data.entityId ? `Until ${formatAttributeName(data.attribute || 'state')} is ${formatStateOption(data.to || '', entity)}` : 'Choose an entity'
   if (data.kind === 'end') return 'Branch stops here'
@@ -720,6 +735,15 @@ function validateNodeData(data, entityById = new Map(), services = {}) {
     if (rules.some((rule) => rule.entityId && !entityExists(rule.entityId))) return 'Entity not found'
     if (rules.some((rule) => !rule.value && rule.operator !== 'exists')) return 'Missing value'
   }
+  if (data.kind === 'direction') {
+    if (!data.entityA || !data.entityB) return 'Missing entities'
+    if (data.entityA && !entityExists(data.entityA)) return 'Entity A not found'
+    if (data.entityB && !entityExists(data.entityB)) return 'Entity B not found'
+    if (!data.directionAB || !data.directionBA) return 'Missing direction labels'
+    if (!data.targetEntityId) return 'Missing target helper'
+    if (data.targetEntityId && !entityExists(data.targetEntityId)) return 'Target not found'
+    if (data.targetEntityId && !['input_text', 'input_select'].includes(String(data.targetEntityId).split('.')[0])) return 'Use input_text or input_select'
+  }
   if (data.kind === 'wait' && !data.entityId) return 'Missing entity'
   if (data.kind === 'wait' && data.entityId && !entityExists(data.entityId)) return 'Entity not found'
   if (data.kind === 'service') {
@@ -861,6 +885,7 @@ function isEntitySelected(node, entityId) {
   if (node.data?.entityIds?.includes(entityId)) return true
   if (node.data?.kind === 'condition' && getConditionRules(node.data).some((rule) => rule.entityId === entityId)) return true
   if (node.data?.kind === 'state' && getStateTriggerRules(node.data).some((rule) => rule.entityId === entityId)) return true
+  if (node.data?.kind === 'direction') return [node.data.entityA, node.data.entityB, node.data.targetEntityId].includes(entityId)
   return node.data?.kind !== 'service' && node.data?.entityId === entityId
 }
 
@@ -1510,6 +1535,27 @@ function FlowWorkspace() {
         entityId: rules[0]?.entityId ?? '',
         label: rules.length === 1 ? (entity.friendlyName || entity.entity_id) : `${rules.length} Conditions`,
       })
+      return
+    }
+
+    if (selectedNode.data.kind === 'direction') {
+      if (['input_text', 'input_select'].includes(entity.domain)) {
+        updateNodeData({ targetEntityId: entity.entity_id })
+        return
+      }
+      if (selectedNode.data.entityA === entity.entity_id) {
+        updateNodeData({ entityA: '' })
+        return
+      }
+      if (selectedNode.data.entityB === entity.entity_id) {
+        updateNodeData({ entityB: '' })
+        return
+      }
+      if (!selectedNode.data.entityA) {
+        updateNodeData({ entityA: entity.entity_id, label: selectedNode.data.label || 'Direction' })
+        return
+      }
+      updateNodeData({ entityB: entity.entity_id })
       return
     }
 
@@ -2182,10 +2228,10 @@ function FlowWorkspace() {
               <button onClick={saveFlow} title="Save flow" type="button"><Save size={18} /></button>
               <button onClick={() => runFlow()} title="Run full flow" type="button"><Play size={18} /></button>
               <button onClick={() => runFlow({ fromSelected: true })} disabled={!selectedId} title="Run from selected node" type="button"><SquarePlay size={18} /></button>
+              <button className={showLastRunSnapshot ? 'is-active' : ''} onClick={() => setShowLastRunSnapshot((current) => !current)} disabled={!hasLastRunSnapshot} title="Show last run snapshot" type="button"><History size={18} /></button>
               <button onClick={() => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))} title={`Switch to ${isDarkTheme ? 'light' : 'dark'} mode`} type="button">
                 {isDarkTheme ? <Sun size={18} /> : <Moon size={18} />}
               </button>
-              <button className={showLastRunSnapshot ? 'is-active' : ''} onClick={() => setShowLastRunSnapshot((current) => !current)} disabled={!hasLastRunSnapshot} title="Show last run snapshot" type="button"><History size={18} /></button>
               <button className={runner.enabled ? 'is-active' : ''} onClick={toggleRunner} title="Toggle automatic runner" type="button"><Power size={18} /></button>
               <button onClick={groupSelected} disabled={!hasNodeSelection} title="Group selected" type="button"><ListTree size={18} /></button>
               <button onClick={duplicateSelected} disabled={!hasNodeSelection} title="Duplicate selected" type="button"><Copy size={18} /></button>
@@ -2490,6 +2536,7 @@ function Inspector({ entities, node, services, updateNodeData }) {
   const nodeStateOptions = useMemo(() => {
     return Array.from(new Set([...stateOptions, data.from, data.to].filter(Boolean)))
   }, [data.from, data.to, stateOptions])
+  const helperEntities = useMemo(() => entities.filter((entity) => ['input_text', 'input_select'].includes(entity.domain)), [entities])
   const domainOptions = Object.keys(services).sort()
   const serviceNames = data.domain && services[data.domain] ? Object.keys(services[data.domain]).sort() : []
 
@@ -2645,6 +2692,38 @@ function Inspector({ entities, node, services, updateNodeData }) {
               )
             })}
           </div>
+        </div>
+      )}
+      {data.kind === 'direction' && (
+        <div className="direction-editor">
+          <div className="field-grid">
+            <label>
+              Entity A
+              <EntityInput entities={entities} onChange={(entityA) => updateNodeData({ entityA })} placeholder="Select first entity" value={data.entityA} />
+            </label>
+            <label>
+              Entity B
+              <EntityInput entities={entities} onChange={(entityB) => updateNodeData({ entityB })} placeholder="Select second entity" value={data.entityB} />
+            </label>
+          </div>
+          <label>
+            Active states
+            <input value={data.activeStates ?? DIRECTION_ACTIVE_STATES} onChange={(event) => updateNodeData({ activeStates: event.target.value })} />
+          </label>
+          <div className="field-grid">
+            <label>
+              A then B
+              <input value={data.directionAB ?? 'in'} onChange={(event) => updateNodeData({ directionAB: event.target.value })} />
+            </label>
+            <label>
+              B then A
+              <input value={data.directionBA ?? 'out'} onChange={(event) => updateNodeData({ directionBA: event.target.value })} />
+            </label>
+          </div>
+          <label>
+            Save to helper
+            <EntityInput entities={helperEntities} onChange={(targetEntityId) => updateNodeData({ targetEntityId })} placeholder="Select input_text or input_select" value={data.targetEntityId} />
+          </label>
         </div>
       )}
       {data.kind === 'condition' && (

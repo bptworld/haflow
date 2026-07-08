@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.37
+
+- Add a Direction node that compares two active entities, determines whether movement was A to B or B to A, and writes the result to an `input_text` or `input_select` helper.
+- Move the Show Last Run toolbar button before the light/dark theme button.
+
 ## 0.1.36
 
 - Fix Schedule nodes so they also act as time gates when reached from another node, stopping downstream actions outside the configured time/day window.
