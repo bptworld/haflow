@@ -1530,9 +1530,11 @@ function invalidateRunnableFlowCache() {
 
 async function getStarterPackFlows() {
   const simpleMotion = await readJson(path.join(examplesDir, 'simple-motion-light.json'), createSimpleMotionFlow())
+  const pico2 = await readJson(path.join(examplesDir, '2-button-pico-example.json'), createTwoButtonPicoFlow())
   const pico = await readJson(path.join(examplesDir, '5-button-pico-example.json'), createFiveButtonPicoFlow())
   return [
     { name: 'Starter - Simple Motion Light', flow: simpleMotion },
+    { name: 'Starter - 2 Button Pico Controller', flow: pico2 },
     { name: 'Starter - 5 Button Pico Controller', flow: pico },
     { name: 'Starter - Contact Sensor Notification', flow: createContactNotificationFlow() },
     { name: 'Starter - Scheduled Evening Scene', flow: createScheduledSceneFlow() },
@@ -1551,6 +1553,10 @@ function createSimpleMotionFlow() {
 }
 
 function createFiveButtonPicoFlow() {
+  return { nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 } }
+}
+
+function createTwoButtonPicoFlow() {
   return { nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 } }
 }
 

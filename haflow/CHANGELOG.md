@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.33
+
+- Add a 2-button Pico controller example flow and include it in the Starter Pack.
+
 ## 0.1.32
 
 - Prevent duplicate flow names by automatically numbering new or copied flows.

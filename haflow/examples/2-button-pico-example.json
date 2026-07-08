@@ -1,0 +1,158 @@
+{
+  "nodes": [
+    {
+      "id": "group-pico-2-button",
+      "type": "haflow",
+      "position": {
+        "x": 60,
+        "y": 60
+      },
+      "data": {
+        "kind": "group",
+        "label": "2 Button Pico Controller",
+        "groupDeviceName": "Example Pico Device"
+      },
+      "style": {
+        "width": 760,
+        "height": 330
+      },
+      "measured": {
+        "width": 760,
+        "height": 330
+      }
+    },
+    {
+      "id": "trigger-pico-2-button-1",
+      "type": "haflow",
+      "parentId": "group-pico-2-button",
+      "extent": "parent",
+      "position": {
+        "x": 42,
+        "y": 74
+      },
+      "data": {
+        "kind": "state",
+        "label": "Button 1 On",
+        "entityId": "",
+        "from": "",
+        "to": "",
+        "buttonNumber": 1,
+        "deviceId": "",
+        "triggers": [
+          {
+            "id": "starter-2-pico-button-1-rule",
+            "entityId": "",
+            "deviceId": "",
+            "deviceIdentifiers": [],
+            "buttonNumber": 1,
+            "from": "",
+            "to": ""
+          }
+        ]
+      },
+      "measured": {
+        "width": 232,
+        "height": 125
+      }
+    },
+    {
+      "id": "action-pico-2-button-1",
+      "type": "haflow",
+      "parentId": "group-pico-2-button",
+      "extent": "parent",
+      "position": {
+        "x": 430,
+        "y": 74
+      },
+      "data": {
+        "kind": "service",
+        "label": "Button 1 Action",
+        "domain": "",
+        "service": "",
+        "entityIds": [],
+        "payload": "{}",
+        "entityId": ""
+      },
+      "measured": {
+        "width": 232,
+        "height": 124
+      }
+    },
+    {
+      "id": "trigger-pico-2-button-2",
+      "type": "haflow",
+      "parentId": "group-pico-2-button",
+      "extent": "parent",
+      "position": {
+        "x": 42,
+        "y": 194
+      },
+      "data": {
+        "kind": "state",
+        "label": "Button 2 Off",
+        "entityId": "",
+        "from": "",
+        "to": "",
+        "buttonNumber": 2,
+        "deviceId": "",
+        "triggers": [
+          {
+            "id": "starter-2-pico-button-2-rule",
+            "entityId": "",
+            "deviceId": "",
+            "deviceIdentifiers": [],
+            "buttonNumber": 2,
+            "from": "",
+            "to": ""
+          }
+        ]
+      },
+      "measured": {
+        "width": 232,
+        "height": 124
+      }
+    },
+    {
+      "id": "action-pico-2-button-2",
+      "type": "haflow",
+      "parentId": "group-pico-2-button",
+      "extent": "parent",
+      "position": {
+        "x": 430,
+        "y": 194
+      },
+      "data": {
+        "kind": "service",
+        "label": "Button 2 Action",
+        "domain": "",
+        "service": "",
+        "entityIds": [],
+        "payload": "{}",
+        "entityId": ""
+      },
+      "measured": {
+        "width": 232,
+        "height": 124
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge-pico-2-button-1",
+      "source": "trigger-pico-2-button-1",
+      "target": "action-pico-2-button-1",
+      "animated": true
+    },
+    {
+      "id": "edge-pico-2-button-2",
+      "source": "trigger-pico-2-button-2",
+      "target": "action-pico-2-button-2",
+      "animated": true
+    }
+  ],
+  "viewport": {
+    "x": 0,
+    "y": 0,
+    "zoom": 1
+  }
+}
