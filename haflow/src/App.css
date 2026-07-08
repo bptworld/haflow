@@ -1189,6 +1189,13 @@ textarea:focus {
   gap: 10px;
 }
 
+.field-note {
+  margin: -4px 0 10px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
 .schedule-editor {
   display: grid;
   gap: 10px;

@@ -219,7 +219,7 @@ const nodeCatalog = [
   {
     type: 'notify',
     label: 'Notify',
-    description: 'Sends a Home Assistant notification message.',
+    description: 'Sends a Home Assistant notification message. Use {direction} after a Direction node.',
     icon: Bell,
     color: '#be123c',
     data: { message: 'HAFlow ran', target: '', label: 'Notify' },
@@ -2783,7 +2783,8 @@ function Inspector({ entities, node, services, updateNodeData }) {
       )}
       {data.kind === 'notify' && (
         <>
-          <label>Message<input value={data.message ?? ''} onChange={(event) => updateNodeData({ message: event.target.value })} /></label>
+          <label>Message<input value={data.message ?? ''} onChange={(event) => updateNodeData({ message: event.target.value })} placeholder="Driveway motion: {direction}" /></label>
+          <p className="field-note">Use {'{direction}'} to include the latest Direction node result.</p>
           <label>Target<input value={data.target ?? ''} onChange={(event) => updateNodeData({ target: event.target.value })} placeholder="notify.mobile_app_phone" /></label>
         </>
       )}

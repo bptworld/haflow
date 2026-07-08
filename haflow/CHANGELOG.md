@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.39
+
+- Let Notify messages include the latest Direction node result with `{direction}`.
+- Show `{direction}` usage in Notify help text.
+
 ## 0.1.38
 
 - Add an AND node that continues only when all incoming state triggers or condition nodes are currently active.

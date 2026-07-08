@@ -465,7 +465,8 @@ async function runFlow(flow, startNodeId, options = {}) {
   if (!startNodes.length) throw new Error('Pick a start node or add a trigger with no incoming link.')
   log('info', `Running ${startNodes.length} start node${startNodes.length === 1 ? '' : 's'}.`)
 
-  await Promise.all(startNodes.map((startNode) => walk(startNode, nodesById, edges, new Set(), options)))
+  const runOptions = { ...options, context: options.context ?? {} }
+  await Promise.all(startNodes.map((startNode) => walk(startNode, nodesById, edges, new Set(), runOptions)))
 
   return 'Flow run completed.'
 }
@@ -566,6 +567,9 @@ async function executeNode(node, options = {}) {
   if (data.kind === 'direction') {
     const direction = await resolveDirection(data)
     if (!direction) return false
+    options.context.direction = direction
+    options.context.lastDirection = direction
+    options.context[`direction:${node.id}`] = direction
     await writeDirectionTarget(data.targetEntityId, direction)
     log('info', `${data.label || 'Direction'} resolved ${direction} and saved to ${data.targetEntityId}.`)
     return true
@@ -591,7 +595,8 @@ async function executeNode(node, options = {}) {
   if (data.kind === 'notify') {
     const target = data.target || 'notify.notify'
     const [, service = 'notify'] = target.split('.')
-    await callService('notify', service, { message: data.message || 'HAFlow notification' })
+    const message = renderRunMessage(data.message || 'HAFlow notification', options.context)
+    await callService('notify', service, { message })
     log('info', `Sent notification via ${target}.`)
     return true
   }
@@ -892,6 +897,12 @@ async function writeDirectionTarget(targetEntityId, direction) {
     return
   }
   throw new Error('Direction target must be an input_text or input_select helper.')
+}
+
+function renderRunMessage(message, context = {}) {
+  return String(message ?? '').replace(/\{(direction|lastDirection)\}/gi, (token, key) => {
+    return context[key] ?? context.direction ?? token
+  })
 }
 
 async function handleHomeAssistantEvent(event) {
