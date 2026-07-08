@@ -40,6 +40,7 @@ import {
   PanelRightClose,
   PanelRightOpen,
   Pause,
+  Pencil,
   Play,
   PlugZap,
   Power,
@@ -487,9 +488,11 @@ function formatOperatorLabel(operator) {
   return 'equals'
 }
 
-function getUniqueFlowName(name, flows) {
+function getUniqueFlowName(name, flows, currentFlowId = '') {
   const baseName = String(name || 'New Flow').trim() || 'New Flow'
-  const existing = new Set(flows.map((flow) => String(flow.name || '').trim().toLowerCase()))
+  const existing = new Set(flows
+    .filter((flow) => flow.id !== currentFlowId)
+    .map((flow) => String(flow.name || '').trim().toLowerCase()))
   if (!existing.has(baseName.toLowerCase())) return baseName
   let index = 2
   while (existing.has(`${baseName} ${index}`.toLowerCase())) index += 1
@@ -1696,6 +1699,21 @@ function FlowWorkspace() {
     await loadFlow(result.activeFlowId ?? 'default')
   }
 
+  const renameFlow = async () => {
+    const requestedName = newFlowName.trim()
+    if (!requestedName || !activeFlow) return
+    const name = getUniqueFlowName(requestedName, flows, activeFlowId)
+    const response = await apiFetch(`/api/flows/${activeFlowId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    })
+    const result = await response.json()
+    setFlows(result.flows ?? [])
+    setNewFlowName('')
+    setLogs((current) => [{ time: new Date().toISOString(), level: 'info', message: `Renamed flow to ${result.flow?.name || name}.` }, ...current])
+  }
+
   const toggleFlowPaused = async () => {
     const response = await apiFetch(`/api/flows/${activeFlowId}/pause`, {
       method: 'PATCH',
@@ -2015,10 +2033,11 @@ function FlowWorkspace() {
             ) : null}
           </div>
           {activeFlow?.paused ? <div className="flow-paused-badge">Paused</div> : null}
-          <input value={newFlowName} onChange={(event) => setNewFlowName(event.target.value)} placeholder="New flow name" />
+          <input value={newFlowName} onChange={(event) => setNewFlowName(event.target.value)} placeholder="Flow name" />
           <div className="flow-library-actions">
             <button onClick={() => createFlow(false)} title="Create flow" type="button"><FilePlus size={16} /> New</button>
             <button onClick={() => createFlow(true)} title="Duplicate flow" type="button"><Copy size={16} /> Copy</button>
+            <button disabled={!newFlowName.trim()} onClick={renameFlow} title="Rename selected flow" type="button"><Pencil size={16} /> Rename</button>
             <button className={activeFlow?.paused ? 'resume-flow' : 'pause-flow'} onClick={toggleFlowPaused} title={activeFlow?.paused ? 'Resume flow' : 'Pause flow'} type="button">
               {activeFlow?.paused ? <Play size={16} /> : <Pause size={16} />}
               {activeFlow?.paused ? 'Resume' : 'Pause'}

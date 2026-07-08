@@ -171,6 +171,22 @@ app.patch('/api/flows/:flowId/pause', async (req, res) => {
   res.json({ flows: await readFlowIndex(), activeFlowId: config.activeFlowId ?? 'default' })
 })
 
+app.patch('/api/flows/:flowId', async (req, res) => {
+  const flowId = safeFlowId(req.params.flowId)
+  if (!flowId) return res.status(400).json({ error: 'Invalid flow id.' })
+  const flows = await readFlowIndex()
+  const flow = flows.find((item) => item.id === flowId)
+  if (!flow) return res.status(404).json({ error: 'Flow not found.' })
+  const name = ensureUniqueFlowName(req.body.name || flow.name, flows, flowId)
+  const nextFlow = { ...flow, name }
+  await writeFlowIndex(flows.map((item) => item.id === flowId ? nextFlow : item))
+  if ((config.activeFlowId ?? 'default') === flowId) cachedFlowMeta = nextFlow
+  invalidateRunnableFlowCache()
+  log('info', `Renamed flow to ${name}.`)
+  broadcastRunner()
+  res.json({ flow: nextFlow, flows: await readFlowIndex(), activeFlowId: config.activeFlowId ?? 'default' })
+})
+
 app.get('/api/flows/default', async (_, res) => {
   config = { ...config, activeFlowId: 'default' }
   await writeJson(configPath, config)
@@ -1608,9 +1624,11 @@ function ensureUniqueFlowId(baseId, flows) {
   return `${baseId}-${index}`
 }
 
-function ensureUniqueFlowName(name, flows) {
+function ensureUniqueFlowName(name, flows, currentFlowId = '') {
   const baseName = String(name || 'New Flow').trim() || 'New Flow'
-  const existing = new Set(flows.map((flow) => String(flow.name || '').trim().toLowerCase()))
+  const existing = new Set(flows
+    .filter((flow) => flow.id !== currentFlowId)
+    .map((flow) => String(flow.name || '').trim().toLowerCase()))
   if (!existing.has(baseName.toLowerCase())) return baseName
   let index = 2
   while (existing.has(`${baseName} ${index}`.toLowerCase())) index += 1
