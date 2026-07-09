@@ -2063,11 +2063,23 @@ function normalizeVoiceEntityHints(items = []) {
       item.text,
       entityId.split('.').slice(1).join('.').replace(/_/g, ' '),
     ].filter(Boolean).map(String))
+    for (const name of Array.from(names)) {
+      const stripped = stripVoiceEntitySuffixes(name)
+      if (stripped && stripped !== normalizeVoiceText(name)) names.add(stripped)
+    }
     for (const name of names) {
       const key = `${entityId}:${normalizeVoiceText(name)}`
       if (seen.has(key)) continue
       seen.add(key)
-      hints.push({ entityId, domain, name })
+      hints.push({
+        entityId,
+        domain,
+        name,
+        deviceClass: item.attributes?.device_class || item.device_class || '',
+        deviceType: item.deviceType || '',
+        state: item.state || '',
+        valueOptions: Array.isArray(item.valueOptions) ? item.valueOptions : [],
+      })
     }
   }
   return hints
@@ -2076,9 +2088,11 @@ function normalizeVoiceEntityHints(items = []) {
 function withResolvedVoiceEntity(item, entityHints, preferredDomains = []) {
   const match = resolveVoiceEntityHint(item.label, entityHints, preferredDomains)
   if (!match) return item
+  const resolvedState = item.requestedState ? voiceStateForResolvedEntity(item.requestedState, match) : item.state
   return {
     ...item,
-    ...(match.confident ? { entityId: match.entityId, domain: item.domain || match.domain } : {}),
+    ...(resolvedState ? { state: resolvedState } : {}),
+    ...(match.confident ? { entityId: match.entityId, domain: match.domain || item.domain } : {}),
     ...(match.suggestions.length ? { entitySuggestions: match.suggestions } : {}),
   }
 }
@@ -2092,24 +2106,40 @@ function resolveVoiceEntityHint(label, entityHints = [], preferredDomains = []) 
       const entityId = String(hint.entityId || hint.entity_id || '')
       const name = String(hint.name || hint.friendlyName || hint.friendly_name || '')
       const domain = String(hint.domain || entityId.split('.')[0] || '')
+      const hintDeviceText = normalizeVoiceText([hint.deviceClass, hint.deviceType].filter(Boolean).join(' '))
       const normalizedName = normalizeVoiceText(name)
       const normalizedEntity = normalizeVoiceText(entityId.split('.').slice(1).join(' ').replace(/_/g, ' '))
+      const normalizedSearchName = normalizeVoiceText([normalizedName, normalizedEntity, hintDeviceText].filter(Boolean).join(' '))
       const exact = normalizedName === normalizedLabel || normalizedEntity === normalizedLabel
       const contains = normalizedName.includes(normalizedLabel) || normalizedLabel.includes(normalizedName) || normalizedEntity.includes(normalizedLabel)
-      const close = voiceTextSimilarity(normalizedLabel, normalizedName) >= 0.45 || voiceTextSimilarity(normalizedLabel, normalizedEntity) >= 0.45
+      const labelCoverage = voiceTextSimilarity(normalizedLabel, normalizedSearchName)
+      const close = voiceTextSimilarity(normalizedLabel, normalizedName) >= 0.45 || voiceTextSimilarity(normalizedLabel, normalizedEntity) >= 0.45 || labelCoverage >= 0.72
       if (!entityId || (!exact && !contains && !close)) return null
       const domainScore = !allowedDomains.size || allowedDomains.has(domain) ? 20 : 0
       const exactScore = exact ? 40 : 0
       const containsScore = contains ? 24 : 0
-      const closeScore = close ? 12 : 0
+      const closeScore = close ? Math.round(labelCoverage * 18) : 0
       const lengthScore = Math.max(0, 20 - Math.abs(normalizedName.length - normalizedLabel.length))
-      return { entityId, domain, name, confident: exact || (contains && domainScore > 0), score: domainScore + exactScore + containsScore + closeScore + lengthScore }
+      return {
+        entityId,
+        domain,
+        name,
+        deviceClass: hint.deviceClass || '',
+        deviceType: hint.deviceType || '',
+        state: hint.state || '',
+        valueOptions: hint.valueOptions || [],
+        confident: exact || (contains && domainScore > 0),
+        score: domainScore + exactScore + containsScore + closeScore + lengthScore,
+      }
     })
     .filter(Boolean)
     .sort((first, second) => second.score - first.score || first.entityId.localeCompare(second.entityId))
   if (!matches.length) return null
   const suggestions = matches.slice(0, 5).map(({ entityId, domain, name }) => ({ entityId, domain, name }))
-  return { ...matches[0], suggestions }
+  const preferredMatches = allowedDomains.size ? matches.filter((match) => allowedDomains.has(match.domain)) : matches
+  const uniquePreferredEntityIds = new Set(preferredMatches.map((match) => match.entityId))
+  const best = matches[0]
+  return { ...best, confident: best.confident || uniquePreferredEntityIds.size === 1, suggestions }
 }
 
 function getVoiceConditionDomains(state) {
@@ -2131,6 +2161,30 @@ function voiceTextSimilarity(firstValue, secondValue) {
     }
   }
   return score / Math.max(firstTokens.length, secondTokens.length)
+}
+
+function voiceStateForResolvedEntity(requestedState, match) {
+  const requested = normalizeVoiceText(requestedState)
+  const options = new Set([match.state, ...(match.valueOptions || [])].filter(Boolean).map((value) => normalizeVoiceText(value)))
+  if (options.has(requested)) return requested
+  if (match.domain === 'binary_sensor') {
+    if (['open', 'opened', 'detected', 'occupied', 'home', 'locked', 'on'].includes(requested)) return 'on'
+    if (['closed', 'clear', 'cleared', 'unoccupied', 'away', 'unlocked', 'off'].includes(requested)) return 'off'
+  }
+  if (match.domain === 'cover') {
+    if (['open', 'opened'].includes(requested)) return 'open'
+    if (requested === 'closed') return 'closed'
+  }
+  if (match.domain === 'lock' && ['locked', 'unlocked'].includes(requested)) return requested
+  if (['person', 'device_tracker'].includes(match.domain)) {
+    if (requested === 'home') return 'home'
+    if (requested === 'away') return 'not_home'
+  }
+  if (['light', 'switch', 'fan', 'input_boolean', 'humidifier'].includes(match.domain)) {
+    if (['on', 'open', 'opened', 'detected', 'occupied'].includes(requested)) return 'on'
+    if (['off', 'closed', 'clear', 'cleared', 'unoccupied'].includes(requested)) return 'off'
+  }
+  return voiceState(requested)
 }
 
 function normalizeVoiceMatchTokens(value) {
@@ -2155,6 +2209,13 @@ function voiceTokensMatch(firstToken, secondToken) {
   if (firstToken.length >= 3 && secondToken.startsWith(firstToken)) return true
   if (secondToken.length >= 3 && firstToken.startsWith(secondToken)) return true
   return false
+}
+
+function stripVoiceEntitySuffixes(value) {
+  return normalizeVoiceText(value)
+    .replace(/\b(?:binary sensor|contact sensor|contact|sensor|opening sensor|door sensor|window sensor|motion sensor|light entity|switch entity)\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
 }
 
 function buildVoiceRecipeFlow(description, { entityHints = [] } = {}) {
@@ -2300,7 +2361,7 @@ function parseVoiceConditions(text) {
     const state = voiceState(stateValue)
     if (!label) return
     if (conditions.some((item) => item.label === label && item.state === state)) return
-    conditions.push({ label, state, stateLabel: voiceStateLabel(stateValue) })
+    conditions.push({ label, state, requestedState: normalizeVoiceText(stateValue), stateLabel: voiceStateLabel(stateValue) })
   }
 
   for (const match of normalized.matchAll(/\b(?:if|when|while|only if|provided|and|or|with)\s+(.+?)\s+(?:is|are|becomes|become|gets|get)\s+(open|opened|closed|on|off|detected|clear|cleared|occupied|unoccupied|home|away|locked|unlocked)\b/g)) {
@@ -2441,7 +2502,7 @@ function voiceVerbState(value) {
 }
 
 function oppositeVoiceState(state) {
-  return { on: 'off', off: 'on', locked: 'unlocked', unlocked: 'locked', home: 'not_home', not_home: 'home' }[state] || ''
+  return { on: 'off', off: 'on', open: 'closed', closed: 'open', locked: 'unlocked', unlocked: 'locked', home: 'not_home', not_home: 'home' }[state] || ''
 }
 
 function cleanVoiceTarget(value) {

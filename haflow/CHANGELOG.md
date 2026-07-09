@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.57
+
+- Use Home Assistant entity attributes, domains, states, and value options when resolving described Recipe and Voice flows.
+- Auto-select the only plausible entity match even when its friendly name includes suffixes such as Contact Sensor.
+- Preserve Open and Closed wording in generated door/opening labels while still saving the correct Home Assistant states.
+- Use the matched entity domain for generated on/off actions so switches, fans, helpers, and lights call the right service domain.
+
 ## 0.1.56
 
 - Let described Recipe and Voice flows use Home Assistant entity hints to prefill generated trigger, condition, and action nodes by entity ID.

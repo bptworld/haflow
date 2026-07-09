@@ -34,6 +34,8 @@ HAFlow tries to resolve names against Home Assistant entity data. Generated flow
 
 If HAFlow finds close entity matches but cannot confidently choose one, the generated node keeps the entity blank and shows the close matches as a suggested dropdown in the Inspector. Close matching understands common abbreviated or partial wording such as `dr` for `door`, `bath` for `bathroom`, and `read lamp` for `reading lamp`.
 
+When an entity is resolved, HAFlow uses its Home Assistant domain, device class, state, and value options. For example, a binary door sensor keeps Home Assistant `off -> on` internally but shows `Closed -> Open` wording, while a cover-style garage door can use `closed -> open`.
+
 When Home Assistant or another caller already knows the exact entities, include entity hints so HAFlow can build nodes by ID:
 
 ```json

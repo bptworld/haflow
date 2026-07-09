@@ -1218,20 +1218,35 @@ function buildRecipeEntityHints(entities = []) {
       const domain = entity.domain || entityId.split('.')[0]
       const names = new Set([
         entity.friendlyName,
+        entity.friendly_name,
         entity.attributes?.friendly_name,
         entity.name,
         entityId.split('.').slice(1).join('.').replace(/_/g, ' '),
       ].filter(Boolean).map(String))
-      return Array.from(names).map((name) => ({ name, entityId, domain }))
+      for (const name of Array.from(names)) {
+        const stripped = stripRecipeEntitySuffixes(name)
+        if (stripped && stripped !== normalizeRecipeText(name)) names.add(stripped)
+      }
+      return Array.from(names).map((name) => ({
+        name,
+        entityId,
+        domain,
+        deviceClass: entity.attributes?.device_class || '',
+        deviceType: entity.deviceType || '',
+        state: entity.state || '',
+        valueOptions: entity.valueOptions || [],
+      }))
     })
 }
 
 function withResolvedRecipeEntity(item, entityHints, preferredDomains = []) {
   const match = resolveRecipeEntityHint(item.label, entityHints, preferredDomains)
   if (!match) return item
+  const resolvedState = item.requestedState ? recipeStateForResolvedEntity(item.requestedState, match) : item.state
   return {
     ...item,
-    ...(match.confident ? { entityId: match.entityId, domain: item.domain || match.domain } : {}),
+    ...(resolvedState ? { state: resolvedState } : {}),
+    ...(match.confident ? { entityId: match.entityId, domain: match.domain || item.domain } : {}),
     ...(match.suggestions.length ? { entitySuggestions: match.suggestions } : {}),
   }
 }
@@ -1245,24 +1260,40 @@ function resolveRecipeEntityHint(label, entityHints = [], preferredDomains = [])
       const entityId = String(hint.entityId || hint.entity_id || '')
       const name = String(hint.name || hint.friendlyName || hint.friendly_name || '')
       const domain = String(hint.domain || entityId.split('.')[0] || '')
+      const hintDeviceText = normalizeRecipeText([hint.deviceClass, hint.deviceType].filter(Boolean).join(' '))
       const normalizedName = normalizeRecipeText(name)
       const normalizedEntity = normalizeRecipeText(entityId.split('.').slice(1).join(' ').replace(/_/g, ' '))
+      const normalizedSearchName = normalizeRecipeText([normalizedName, normalizedEntity, hintDeviceText].filter(Boolean).join(' '))
       const exact = normalizedName === normalizedLabel || normalizedEntity === normalizedLabel
       const contains = normalizedName.includes(normalizedLabel) || normalizedLabel.includes(normalizedName) || normalizedEntity.includes(normalizedLabel)
-      const close = recipeTextSimilarity(normalizedLabel, normalizedName) >= 0.45 || recipeTextSimilarity(normalizedLabel, normalizedEntity) >= 0.45
+      const labelCoverage = recipeTextSimilarity(normalizedLabel, normalizedSearchName)
+      const close = recipeTextSimilarity(normalizedLabel, normalizedName) >= 0.45 || recipeTextSimilarity(normalizedLabel, normalizedEntity) >= 0.45 || labelCoverage >= 0.72
       if (!entityId || (!exact && !contains && !close)) return null
       const domainScore = !allowedDomains.size || allowedDomains.has(domain) ? 20 : 0
       const exactScore = exact ? 40 : 0
       const containsScore = contains ? 24 : 0
-      const closeScore = close ? 12 : 0
+      const closeScore = close ? Math.round(labelCoverage * 18) : 0
       const lengthScore = Math.max(0, 20 - Math.abs(normalizedName.length - normalizedLabel.length))
-      return { entityId, domain, name, confident: exact || (contains && domainScore > 0), score: domainScore + exactScore + containsScore + closeScore + lengthScore }
+      return {
+        entityId,
+        domain,
+        name,
+        deviceClass: hint.deviceClass || '',
+        deviceType: hint.deviceType || '',
+        state: hint.state || '',
+        valueOptions: hint.valueOptions || [],
+        confident: exact || (contains && domainScore > 0),
+        score: domainScore + exactScore + containsScore + closeScore + lengthScore,
+      }
     })
     .filter(Boolean)
     .sort((first, second) => second.score - first.score || first.entityId.localeCompare(second.entityId))
   if (!matches.length) return null
   const suggestions = matches.slice(0, 5).map(({ entityId, domain, name }) => ({ entityId, domain, name }))
-  return { ...matches[0], suggestions }
+  const preferredMatches = allowedDomains.size ? matches.filter((match) => allowedDomains.has(match.domain)) : matches
+  const uniquePreferredEntityIds = new Set(preferredMatches.map((match) => match.entityId))
+  const best = matches[0]
+  return { ...best, confident: best.confident || uniquePreferredEntityIds.size === 1, suggestions }
 }
 
 function getRecipeConditionDomains(state) {
@@ -1284,6 +1315,30 @@ function recipeTextSimilarity(firstValue, secondValue) {
     }
   }
   return score / Math.max(firstTokens.length, secondTokens.length)
+}
+
+function recipeStateForResolvedEntity(requestedState, match) {
+  const requested = normalizeRecipeText(requestedState)
+  const options = new Set([match.state, ...(match.valueOptions || [])].filter(Boolean).map((value) => normalizeRecipeText(value)))
+  if (options.has(requested)) return requested
+  if (match.domain === 'binary_sensor') {
+    if (['open', 'opened', 'detected', 'occupied', 'home', 'locked', 'on'].includes(requested)) return 'on'
+    if (['closed', 'clear', 'cleared', 'unoccupied', 'away', 'unlocked', 'off'].includes(requested)) return 'off'
+  }
+  if (match.domain === 'cover') {
+    if (['open', 'opened'].includes(requested)) return 'open'
+    if (requested === 'closed') return 'closed'
+  }
+  if (match.domain === 'lock' && ['locked', 'unlocked'].includes(requested)) return requested
+  if (['person', 'device_tracker'].includes(match.domain)) {
+    if (requested === 'home') return 'home'
+    if (requested === 'away') return 'not_home'
+  }
+  if (['light', 'switch', 'fan', 'input_boolean', 'humidifier'].includes(match.domain)) {
+    if (['on', 'open', 'opened', 'detected', 'occupied'].includes(requested)) return 'on'
+    if (['off', 'closed', 'clear', 'cleared', 'unoccupied'].includes(requested)) return 'off'
+  }
+  return recipeStateToHomeAssistantState(requested)
 }
 
 function normalizeRecipeMatchTokens(value) {
@@ -1308,6 +1363,13 @@ function recipeTokensMatch(firstToken, secondToken) {
   if (firstToken.length >= 3 && secondToken.startsWith(firstToken)) return true
   if (secondToken.length >= 3 && firstToken.startsWith(secondToken)) return true
   return false
+}
+
+function stripRecipeEntitySuffixes(value) {
+  return normalizeRecipeText(value)
+    .replace(/\b(?:binary sensor|contact sensor|contact|sensor|opening sensor|door sensor|window sensor|motion sensor|light entity|switch entity)\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
 }
 
 function buildRecipeFlow(recipe, values, entities) {
@@ -1418,7 +1480,7 @@ function buildAutomatedRecipeFlow(description, { allowPartial = false, entityHin
   const [triggerCondition, ...extraConditions] = conditions
 
   if (triggerCondition) {
-    const triggerId = addNode('state', `${triggerCondition.label} ${formatStateOption(triggerCondition.state)}`, x, {
+    const triggerId = addNode('state', `${triggerCondition.label} ${triggerCondition.stateLabel || formatStateOption(triggerCondition.state)}`, x, {
       entityId: '',
       from: oppositeState(triggerCondition.state),
       to: triggerCondition.state,
@@ -1438,7 +1500,7 @@ function buildAutomatedRecipeFlow(description, { allowPartial = false, entityHin
   }
 
   for (const condition of extraConditions) {
-    const conditionId = addNode('condition', `${condition.label} Is ${formatStateOption(condition.state)}`, x, {
+    const conditionId = addNode('condition', `${condition.label} Is ${condition.stateLabel || formatStateOption(condition.state)}`, x, {
       conditionMode: 'all',
       entityId: '',
       attribute: 'state',
@@ -1515,9 +1577,9 @@ function buildAutomatedRecipeFlow(description, { allowPartial = false, entityHin
     nodes,
     edges,
     summary: [
-      triggerCondition ? `Trigger: ${triggerCondition.label} is ${formatStateOption(triggerCondition.state)}.` : '',
+      triggerCondition ? `Trigger: ${triggerCondition.label} is ${triggerCondition.stateLabel || formatStateOption(triggerCondition.state)}.` : '',
       schedule ? `Time window: ${schedule.label}.` : '',
-      ...extraConditions.map((condition) => `Condition: ${condition.label} is ${formatStateOption(condition.state)}.`),
+      ...extraConditions.map((condition) => `Condition: ${condition.label} is ${condition.stateLabel || formatStateOption(condition.state)}.`),
       waitSeconds ? `Wait: ${formatDuration(waitSeconds * 1000)}.` : '',
       waitUntil ? `Wait until: ${waitUntil.summary}.` : '',
       ...actions.map((action) => `Action: ${formatAttributeName(action.service)} ${action.label}.`),
@@ -1725,7 +1787,7 @@ function parseRecipeConditions(text) {
     if (!phrase) return
     const label = formatRecipeLabel(phrase)
     if (unique.some((condition) => condition.label.toLowerCase() === label.toLowerCase() && condition.state === state)) return
-    unique.push({ label, state })
+    unique.push({ label, state, requestedState: normalizeRecipeText(stateValue), stateLabel: recipeStateDisplayLabel(stateValue) })
   }
 
   for (const match of matches) {
@@ -2043,6 +2105,31 @@ function recipeStateToHomeAssistantState(value) {
     off: 'off',
   }
   return stateMap[normalized] || normalized
+}
+
+function recipeStateDisplayLabel(value) {
+  const normalized = normalizeRecipeText(value)
+  const labelMap = {
+    open: 'Open',
+    opened: 'Open',
+    opens: 'Open',
+    closed: 'Closed',
+    closes: 'Closed',
+    detected: 'Detected',
+    clear: 'Clear',
+    cleared: 'Clear',
+    occupied: 'Occupied',
+    unoccupied: 'Unoccupied',
+    home: 'Home',
+    away: 'Away',
+    locked: 'Locked',
+    unlocked: 'Unlocked',
+    on: 'On',
+    off: 'Off',
+    'turns on': 'On',
+    'turns off': 'Off',
+  }
+  return labelMap[normalized] || formatStateOption(normalized)
 }
 
 function recipeVerbToState(value) {
