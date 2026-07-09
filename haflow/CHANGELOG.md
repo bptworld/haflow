@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.55
+
+- Make the Flow Recipes dialog body scroll so bottom controls stay reachable on shorter screens.
+
 ## 0.1.54
 
 - Add a Voice Setup helper that generates Home Assistant Assist YAML, copies it, opens the health check, and dry-runs the voice recipe API.

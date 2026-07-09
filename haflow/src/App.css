@@ -1790,6 +1790,7 @@ textarea:focus {
 }
 
 .recipe-modal {
+  grid-template-rows: auto minmax(0, 1fr);
   width: min(720px, calc(100vw - 44px));
 }
 
@@ -1800,7 +1801,11 @@ textarea:focus {
 .recipe-modal-body {
   display: grid;
   gap: 14px;
+  min-height: 0;
   padding: 14px;
+  padding-bottom: 22px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 
 .voice-setup-body {
