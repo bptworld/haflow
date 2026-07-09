@@ -582,12 +582,11 @@ async function executeNode(node, options = {}) {
   if (data.kind === 'service') {
     const payload = parsePayload(data.payload)
     const entityIds = data.entityIds ?? []
-    if (entityIds.length) {
-      const entityTarget = entityIds.length === 1 ? entityIds[0] : entityIds
-      payload.entity_id = entityTarget
+    const serviceCalls = buildServiceCalls(data, payload, entityIds)
+    for (const serviceCall of serviceCalls) {
+      await callService(serviceCall.domain, serviceCall.service, serviceCall.payload)
+      log('info', `Called ${serviceCall.domain}.${serviceCall.service}.`)
     }
-    await callService(data.domain, data.service, payload)
-    log('info', `Called ${data.domain}.${data.service}.`)
     await verifyServiceResult(data, entityIds)
     return true
   }
@@ -620,6 +619,33 @@ async function executeNode(node, options = {}) {
 
   log('info', `${data.label || data.kind || 'Node'} triggered.`)
   return true
+}
+
+function buildServiceCalls(data, basePayload, entityIds) {
+  if (['turn_on', 'turn_off'].includes(data.service) && entityIds.length) {
+    const entityIdsByDomain = new Map()
+    for (const entityId of entityIds) {
+      const domain = String(entityId).split('.')[0]
+      if (!domain) continue
+      entityIdsByDomain.set(domain, [...(entityIdsByDomain.get(domain) ?? []), entityId])
+    }
+
+    if (entityIdsByDomain.size) {
+      return Array.from(entityIdsByDomain.entries()).map(([domain, ids]) => {
+        const payload = { ...basePayload }
+        const entityTarget = ids.length === 1 ? ids[0] : ids
+        payload.entity_id = entityTarget
+        return { domain, service: data.service, payload }
+      })
+    }
+  }
+
+  const payload = { ...basePayload }
+  if (entityIds.length) {
+    const entityTarget = entityIds.length === 1 ? entityIds[0] : entityIds
+    payload.entity_id = entityTarget
+  }
+  return [{ domain: data.domain, service: data.service, payload }]
 }
 
 async function fireTimeTriggers() {

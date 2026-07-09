@@ -68,6 +68,7 @@ import './App.css'
 const ALL_ENTITY_AREAS = '__all_entity_areas__'
 const APP_VERSION = packageInfo.version
 const TARGETLESS_SERVICE_DOMAINS = new Set(['notify', 'persistent_notification'])
+const ON_OFF_SERVICES = new Set(['turn_on', 'turn_off'])
 const NODE_KINDS_REQUIRING_OUTGOING = new Set(['state', 'event', 'time', 'condition', 'or', 'and', 'direction', 'delay', 'wait'])
 const DIRECTION_ACTIVE_STATES = 'on, active, detected, open, occupied, home'
 const PUSHOVER_PRIORITIES = [
@@ -475,7 +476,7 @@ function summarizeNode(data) {
   if (data.kind === 'wait') return data.entityId ? `Until ${formatAttributeName(data.attribute || 'state')} is ${formatStateOption(data.to || '', entity)}` : 'Choose an entity'
   if (data.kind === 'end') return 'Branch stops here'
   if (data.kind === 'service') {
-    const serviceIntent = formatServiceIntent(data.domain, data.service)
+    const serviceIntent = formatServiceIntent(data.domain, data.service, data.actionEntities)
     if (data.actionEntities?.length) return [serviceIntent, formatTargetSummary(data.actionEntities)]
     return selectedCount ? [serviceIntent, `${selectedCount} targets`] : 'Choose entities'
   }
@@ -495,8 +496,12 @@ function formatTargetSummary(entities) {
   return `${entities.length} targets`
 }
 
-function formatServiceIntent(domain, service) {
+function formatServiceIntent(domain, service, actionEntities = []) {
   if (!domain || !service) return 'Choose service'
+  const actionDomains = Array.from(new Set(actionEntities.map((entity) => String(entity.id || '').split('.')[0]).filter(Boolean)))
+  if (ON_OFF_SERVICES.has(service) && actionDomains.length > 1) {
+    return service === 'turn_on' ? 'Turn on selected entities' : 'Turn off selected entities'
+  }
   const domainLabel = formatDomainName(domain)
   const serviceLabels = {
     turn_on: `Turn on ${domainLabel}`,
@@ -792,8 +797,9 @@ function validateNodeData(data, entityById = new Map(), services = {}) {
   if (data.kind === 'wait' && data.entityId && !entityExists(data.entityId)) return 'Entity not found'
   if (data.kind === 'service') {
     if (!data.domain || !data.service) return 'Missing service'
-    if (services[data.domain] && !services[data.domain][data.service]) return 'Service not found'
     const entityIds = data.entityIds?.length ? data.entityIds : (data.entityId ? [data.entityId] : [])
+    const serviceIssue = getServiceValidationIssue(data, entityIds, services)
+    if (serviceIssue) return serviceIssue
     if (entityIds.some((entityId) => !entityExists(entityId))) return 'Entity not found'
     if (data.payload && String(data.payload).trim()) {
       try {
@@ -813,6 +819,17 @@ function validateNodeData(data, entityById = new Map(), services = {}) {
   if (data.kind === 'scene' && !data.entityId) return 'Missing scene'
   if (data.kind === 'scene' && data.entityId && !entityExists(data.entityId)) return 'Scene not found'
   return ''
+}
+
+function getServiceValidationIssue(data, entityIds, services = {}) {
+  if (!ON_OFF_SERVICES.has(data.service) || !entityIds.length) {
+    if (services[data.domain] && !services[data.domain][data.service]) return 'Service not found'
+    return ''
+  }
+
+  const domains = Array.from(new Set(entityIds.map((entityId) => String(entityId).split('.')[0]).filter(Boolean)))
+  const missingDomain = domains.find((domain) => services[domain] && !services[domain][data.service])
+  return missingDomain ? `${formatDomainName(missingDomain)} does not support ${formatAttributeName(data.service)}` : ''
 }
 
 function validateFlow(nodes, edges, entityById = new Map(), services = {}, isPaused = false) {
@@ -1524,7 +1541,6 @@ function FlowWorkspace() {
       const entityIds = current.includes(entity.entity_id)
         ? current.filter((entityId) => entityId !== entity.entity_id)
         : current.concat(entity.entity_id)
-      const domains = Array.from(new Set(entityIds.map((id) => id.split('.')[0])))
       const patch = {
         entityIds,
         entityId: entityIds[0] ?? '',
@@ -1534,11 +1550,8 @@ function FlowWorkspace() {
         patch.domain = ''
         patch.service = ''
         patch.payload = '{}'
-      }
-      if (domains.length === 1) {
-        patch.domain = domains[0]
-        const domainServices = services[domains[0]] ? Object.keys(services[domains[0]]) : []
-        if (!domainServices.includes(selectedNode.data.service)) patch.service = getDefaultService(domainServices, selectedNode.data.service)
+      } else {
+        Object.assign(patch, getActionServicePatch(entityIds, selectedNode.data.service, services))
       }
       updateNodeData(patch)
       return
@@ -2621,13 +2634,7 @@ function Inspector({ entities, node, services, updateNodeData }) {
     if (data.kind === 'service') {
       const current = data.entityIds ?? []
       const entityIds = current.includes(entityId) ? current : current.concat(entityId)
-      const domains = Array.from(new Set(entityIds.map((id) => id.split('.')[0])))
-      const patch = { entityIds }
-      if (domains.length === 1) {
-        patch.domain = domains[0]
-        const domainServices = services[domains[0]] ? Object.keys(services[domains[0]]) : []
-        if (!domainServices.includes(data.service)) patch.service = getDefaultService(domainServices, data.service)
-      }
+      const patch = { entityIds, ...getActionServicePatch(entityIds, data.service, services) }
       updateNodeData(patch)
       return
     }
@@ -2681,6 +2688,7 @@ function Inspector({ entities, node, services, updateNodeData }) {
                     entityIds,
                     entityId: entityIds[0],
                     label: entityIds.length === 1 ? (entities.find((item) => item.entity_id === entityIds[0])?.friendlyName || entityIds[0]) : `${entityIds.length} Actions`,
+                    ...getActionServicePatch(entityIds, data.service, services),
                   } : {
                     entityIds: [],
                     entityId: '',
@@ -2905,6 +2913,30 @@ function getDefaultService(serviceNames, fallback = '') {
   if (serviceNames.includes('open_cover')) return 'open_cover'
   if (serviceNames.includes('lock')) return 'lock'
   return serviceNames[0]
+}
+
+function getActionServicePatch(entityIds, currentService, services = {}) {
+  const domains = Array.from(new Set(entityIds.map((id) => String(id).split('.')[0]).filter(Boolean)))
+  if (!domains.length) return {}
+
+  if (domains.length > 1) {
+    const canKeepOnOff = ON_OFF_SERVICES.has(currentService) && domains.every((domain) => serviceExists(services, domain, currentService))
+    const service = canKeepOnOff
+      ? currentService
+      : domains.every((domain) => serviceExists(services, domain, 'turn_on')) ? 'turn_on' : currentService
+    return { domain: domains[0], service }
+  }
+
+  const domain = domains[0]
+  const domainServices = services[domain] ? Object.keys(services[domain]) : []
+  return {
+    domain,
+    service: getDefaultService(domainServices, currentService),
+  }
+}
+
+function serviceExists(services, domain, service) {
+  return !services[domain] || Boolean(services[domain][service])
 }
 
 function StateTriggerRulesEditor({ data, entities, updateNodeData }) {
