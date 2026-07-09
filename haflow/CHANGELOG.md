@@ -137,7 +137,7 @@
 ## 0.1.13
 
 - Add trigger diagnostics for watched Home Assistant entity changes.
-- Mirror HAFlow run log messages to stdout for easier add-on log review.
+- Mirror HAFlow run log messages to stdout for easier app log review.
 - Hide routine auto-save entries from the Run Log.
 
 ## 0.1.12

@@ -26,6 +26,10 @@ The HAFlow app source is in [`haflow/`](haflow/).
 HAFlow runs inside Home Assistant and connects to Home Assistant Core automatically through the Supervisor API. No long-lived access token is required.
 NOTE: This does not need HACS, this is a HA App!
 
+## Features
+
+See the [detailed feature list](haflow/FEATURES.md) for the full HAFlow capability overview.
+
 ## Examples
 
 Example importable flows are available in [`haflow/examples/`](haflow/examples/):

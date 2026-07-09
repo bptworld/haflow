@@ -6,16 +6,20 @@ A Home Assistant app for building and running flow-based automations.
 
 HAFlow runs inside Home Assistant and connects to Home Assistant Core automatically through the Supervisor API. No long-lived access token is required.
 
-Install HAFlow by adding the repository to Home Assistant:
+To install this app, follow these steps:
 
-1. Go to Settings > Add-ons > Add-on Store.
-2. Open the menu and choose Repositories.
-3. Add `https://github.com/bptworld/haflow`.
-4. Go back to the App Store, open the menu, and choose Check for updates.
-5. Scroll down the App Store or use search to find HAFlow.
-6. Select HAFlow and click Install.
-7. Start HAFlow.
-8. Open HAFlow from the app page or sidebar.
+1. Navigate to the app store in the Home Assistant UI: **Settings**, **Apps**, then **Install App**.
+2. Select the three vertical dots in the upper right-hand corner and select **Repositories**.
+3. On the bottom of the **Repositories** screen, click **Add**,
+4. Enter this project's GitHub page URL and click **Add**:
+   ```text
+   https://github.com/bptworld/haflow
+   ```
+
+5. After adding the repository, go back to the **App Store**, select the three vertical dots in the upper right-hand corner, and select **Check for updates**.
+6. Scroll down the **App Store** or use search to find **HAFlow**.
+7. Select **HAFlow** and click **Install**.
+8. Start HAFlow and open it from the app page or sidebar.
 
 ## Features
 
@@ -26,6 +30,8 @@ Install HAFlow by adding the repository to Home Assistant:
 - Flow library for creating, duplicating, switching, and deleting named flows
 - Dark mode toggle in the toolbar
 - Live run log and node runtime status
+
+See the [detailed feature list](FEATURES.md) for the full HAFlow capability overview.
 
 ## Examples
 
