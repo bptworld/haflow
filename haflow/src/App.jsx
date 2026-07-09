@@ -38,6 +38,7 @@ import {
   History,
   Home,
   ListTree,
+  Mic,
   Moon,
   PanelRightClose,
   PanelRightOpen,
@@ -328,6 +329,25 @@ const nodeCatalog = [
     color: '#334155',
     data: { message: 'Reached debug node', label: 'Debug' },
   },
+]
+
+const AUTOMATED_RECIPE_NODE_KNOWLEDGE = [
+  { kind: 'state', words: ['trigger', 'when', 'if', 'state changes'], description: 'starts a flow when an entity changes state' },
+  { kind: 'event', words: ['event', 'home assistant event', 'state changed event'], description: 'starts a flow from a Home Assistant event' },
+  { kind: 'time', words: ['schedule', 'time', 'sunrise', 'sunset', 'between'], description: 'starts or gates a flow by time' },
+  { kind: 'condition', words: ['condition', 'only if', 'provided', 'while'], description: 'checks a value and branches true or false' },
+  { kind: 'or', words: ['or', 'either', 'any'], description: 'continues when any incoming path reaches it' },
+  { kind: 'and', words: ['and', 'all', 'both'], description: 'continues only when every incoming path is active' },
+  { kind: 'direction', words: ['direction', 'movement', 'a to b', 'b to a', 'in out'], description: 'compares two active entities and stores direction' },
+  { kind: 'group', words: ['group', 'subflow', 'frame'], description: 'frames nodes as a same-screen subflow' },
+  { kind: 'comment', words: ['comment', 'note', 'annotation'], description: 'adds a readable canvas note' },
+  { kind: 'delay', words: ['delay', 'wait for', 'pause for'], description: 'pauses for a fixed duration' },
+  { kind: 'wait', words: ['wait until', 'wait for entity', 'until'], description: 'pauses until an entity reaches a state or timeout' },
+  { kind: 'end', words: ['end', 'stop branch', 'stop here'], description: 'ends a branch' },
+  { kind: 'service', words: ['action', 'service', 'turn on', 'turn off', 'call service'], description: 'runs a Home Assistant service' },
+  { kind: 'notify', words: ['notify', 'notification', 'alert', 'message me'], description: 'sends a Home Assistant notification' },
+  { kind: 'scene', words: ['scene', 'activate scene', 'turn on scene'], description: 'turns on a Home Assistant scene' },
+  { kind: 'debug', words: ['debug', 'log', 'trace'], description: 'writes a message to the run log' },
 ]
 
 const RUNTIME_AFTERGLOW_MS = 10_000
@@ -1206,6 +1226,934 @@ function buildRecipeFlow(recipe, values, entities) {
   return { nodes: [], edges: [] }
 }
 
+function buildAutomatedRecipeFlow(description, { allowPartial = false } = {}) {
+  const text = String(description || '').trim()
+  if (!text) throw new Error('Describe the flow you want to create.')
+
+  const recipeSections = splitRecipeElseSections(text)
+  const conditions = parseRecipeConditions(recipeSections.primary)
+  const actions = parseRecipeActions(recipeSections.primary)
+  const elseActions = recipeSections.otherwise ? parseRecipeActions(recipeSections.otherwise) : []
+  const schedule = parseRecipeSchedule(text)
+  const waitSeconds = parseRecipeWait(recipeSections.primary)
+  const waitUntil = parseRecipeWaitUntil(recipeSections.primary)
+  const requestedNodes = parseRecipeNodeRequests(recipeSections.primary)
+
+  const runnableNodeRequests = requestedNodes.filter((node) => !['group', 'comment'].includes(node.kind))
+  if (!allowPartial && !actions.length && !elseActions.length && !runnableNodeRequests.length && !waitUntil) throw new Error('I could not find an action. Try wording like "turn on hallway light", "send a notification", or "activate a scene".')
+  if (!allowPartial && !conditions.length && !schedule) throw new Error('I could not find a trigger or time window. Try wording like "if front door is open" or "at sunset".')
+  if (allowPartial && !actions.length && !elseActions.length && !conditions.length && !schedule && !waitSeconds && !waitUntil && !requestedNodes.length) throw new Error('I could not find anything to add or change.')
+
+  const nodes = []
+  const edges = []
+  const prefix = `auto-recipe-${createId().slice(0, 8)}`
+  const nextId = (name) => `${prefix}-${name}-${nodes.length + 1}`
+  const addNode = (kind, label, x, data) => {
+    const id = nextId(kind)
+    nodes.push({ id, type: 'haflow', position: { x, y: 120 }, data: { kind, label, ...data } })
+    return id
+  }
+  const connect = (source, target, sourceHandle) => {
+    edges.push({ id: `${source}-${target}`, source, sourceHandle, target, animated: true })
+  }
+
+  let previousId = ''
+  let lastConditionId = ''
+  let x = 80
+  const [triggerCondition, ...extraConditions] = conditions
+
+  if (triggerCondition) {
+    const triggerId = addNode('state', `${triggerCondition.label} ${formatStateOption(triggerCondition.state)}`, x, {
+      entityId: '',
+      from: oppositeState(triggerCondition.state),
+      to: triggerCondition.state,
+      triggers: [{ id: `${prefix}-trigger-rule`, entityId: '', from: oppositeState(triggerCondition.state), to: triggerCondition.state }],
+    })
+    previousId = triggerId
+    x += 300
+  }
+
+  if (schedule) {
+    const scheduleId = addNode('time', schedule.label, x, schedule.data)
+    if (previousId) connect(previousId, scheduleId)
+    previousId = scheduleId
+    x += 300
+  }
+
+  for (const condition of extraConditions) {
+    const conditionId = addNode('condition', `${condition.label} Is ${formatStateOption(condition.state)}`, x, {
+      conditionMode: 'all',
+      entityId: '',
+      attribute: 'state',
+      operator: 'equals',
+      value: condition.state,
+      conditions: [{ id: `${prefix}-condition-${createId().slice(0, 6)}`, entityId: '', attribute: 'state', operator: 'equals', value: condition.state }],
+    })
+    if (previousId) connect(previousId, conditionId)
+    previousId = conditionId
+    lastConditionId = conditionId
+    x += 300
+  }
+
+  if (waitSeconds && actions.length <= 1) {
+    const delayId = addNode('delay', `Wait ${formatDuration(waitSeconds * 1000)}`, x, { seconds: waitSeconds })
+    if (previousId) connect(previousId, delayId)
+    previousId = delayId
+    x += 300
+  }
+
+  if (waitUntil) {
+    const waitId = addNode('wait', waitUntil.label, x, waitUntil.data)
+    if (previousId) connect(previousId, waitId)
+    previousId = waitId
+    x += 300
+  }
+
+  actions.forEach((action, index) => {
+    const actionX = x + (index * 300) + (waitSeconds && actions.length > 1 && index > 0 ? 300 : 0)
+    const actionId = addNode('service', `${formatAttributeName(action.service)} ${action.label}`, actionX, {
+      domain: action.domain,
+      service: action.service,
+      entityId: '',
+      entityIds: [],
+      payload: action.payload,
+    })
+    if (previousId) connect(previousId, actionId, previousId.includes('condition') ? 'true' : undefined)
+    previousId = actionId
+    if (waitSeconds && actions.length > 1 && index === 0) {
+      const delayId = addNode('delay', `Wait ${formatDuration(waitSeconds * 1000)}`, actionX + 300, { seconds: waitSeconds })
+      connect(previousId, delayId)
+      previousId = delayId
+    }
+  })
+  if (actions.length) x += (actions.length + (waitSeconds && actions.length > 1 ? 1 : 0)) * 300
+
+  elseActions.forEach((action, index) => {
+    const actionId = addNode('service', `Otherwise ${formatAttributeName(action.service)} ${action.label}`, x + (index * 300), {
+      domain: action.domain,
+      service: action.service,
+      entityId: '',
+      entityIds: [],
+      payload: action.payload,
+    })
+    if (lastConditionId) connect(lastConditionId, actionId, 'false')
+  })
+  if (elseActions.length) x += elseActions.length * 300
+
+  requestedNodes.forEach((nodeRequest, index) => {
+    const nodeId = addNode(nodeRequest.kind, nodeRequest.label, x + (index * 300), nodeRequest.data)
+    if (previousId && !['group', 'comment'].includes(nodeRequest.kind)) connect(previousId, nodeId, previousId.includes('condition') ? 'true' : undefined)
+    if (!['group', 'comment'].includes(nodeRequest.kind)) previousId = nodeId
+  })
+
+  return {
+    flowName: titleFromRecipeText(text),
+    nodes,
+    edges,
+    summary: [
+      triggerCondition ? `Trigger: ${triggerCondition.label} is ${formatStateOption(triggerCondition.state)}.` : '',
+      schedule ? `Time window: ${schedule.label}.` : '',
+      ...extraConditions.map((condition) => `Condition: ${condition.label} is ${formatStateOption(condition.state)}.`),
+      waitSeconds ? `Wait: ${formatDuration(waitSeconds * 1000)}.` : '',
+      waitUntil ? `Wait until: ${waitUntil.summary}.` : '',
+      ...actions.map((action) => `Action: ${formatAttributeName(action.service)} ${action.label}.`),
+      ...elseActions.map((action) => `Otherwise: ${formatAttributeName(action.service)} ${action.label}.`),
+      ...requestedNodes.map((nodeRequest) => `${formatAttributeName(nodeRequest.kind)}: ${nodeRequest.summary}.`),
+    ].filter(Boolean),
+  }
+}
+
+function adjustAutomatedRecipeFlow(instruction, currentNodes, currentEdges) {
+  const text = String(instruction || '').trim()
+  if (!text) throw new Error('Describe what to add, remove, or change.')
+  const normalized = normalizeRecipeText(text)
+
+  if (/\b(?:remove|delete|take out|drop|without|no longer)\b/.test(normalized)) {
+    return removeAutomatedRecipeParts(text, currentNodes, currentEdges)
+  }
+
+  const replacement = parseRecipeReplacement(text)
+  if (replacement) {
+    return replaceAutomatedRecipeText(replacement, currentNodes, currentEdges)
+  }
+
+  const fragment = buildAutomatedRecipeFlow(text, { allowPartial: true })
+  return appendAutomatedRecipeParts(fragment, currentNodes, currentEdges)
+}
+
+function removeAutomatedRecipeParts(instruction, currentNodes, currentEdges) {
+  const targets = getRecipeRemovalTargets(instruction)
+  const removedIds = new Set()
+  for (const node of currentNodes) {
+    if (recipeNodeMatchesTargets(node, targets)) removedIds.add(node.id)
+  }
+
+  if (!removedIds.size) throw new Error('I could not find a matching node to remove.')
+
+  const nextNodes = currentNodes.filter((node) => !removedIds.has(node.id))
+  return {
+    nodes: nextNodes,
+    edges: rebuildLinearRecipeEdges(nextNodes, currentEdges),
+    summary: [`Removed ${removedIds.size} node${removedIds.size === 1 ? '' : 's'}.`],
+  }
+}
+
+function appendAutomatedRecipeParts(fragment, currentNodes, currentEdges) {
+  if (!fragment.nodes.length) throw new Error('I could not find anything to add.')
+  const startX = currentNodes.length ? Math.max(...currentNodes.map((node) => Number(node.position?.x || 0))) + 300 : 80
+  const appendedNodes = fragment.nodes.map((node, index) => ({
+    ...node,
+    position: { x: startX + (index * 300), y: 120 },
+  }))
+  const nextNodes = currentNodes.concat(appendedNodes)
+  return {
+    nodes: nextNodes,
+    edges: rebuildLinearRecipeEdges(nextNodes, currentEdges),
+    summary: fragment.summary.length ? fragment.summary.map((item) => `Added ${item.charAt(0).toLowerCase()}${item.slice(1)}`) : [`Added ${appendedNodes.length} node${appendedNodes.length === 1 ? '' : 's'}.`],
+  }
+}
+
+function replaceAutomatedRecipeText(replacement, currentNodes, currentEdges) {
+  let changed = 0
+  const oldLabel = formatRecipeLabel(replacement.from)
+  const newLabel = formatRecipeLabel(replacement.to)
+  const targetText = normalizeRecipeText(replacement.from)
+  const durationSeconds = parseRecipeDurationSeconds(replacement.to)
+  const timeoutSeconds = parseRecipeTimeoutSeconds(`timeout after ${replacement.to}`) || durationSeconds
+  const schedulePoint = parseRecipeTimeFromText(replacement.to)
+  const scheduleDays = parseRecipeScheduleDays(normalizeRecipeText(replacement.to))
+  const actionPayload = buildRecipeActionPayload(normalizeRecipeText(replacement.to))
+  const messageText = extractRecipeQuotedText(replacement.rawTo || replacement.to) || sentenceCaseRecipeText(replacement.to)
+  const nextNodes = currentNodes.map((node) => {
+    const label = String(node.data?.label || '')
+    const nodeMatches = labelMatchesRecipeText(label, replacement.from) || recipeKindMatchesText(node.data?.kind, targetText)
+    if (!nodeMatches) return node
+    changed += 1
+    if (node.data?.kind === 'delay' && durationSeconds) {
+      return { ...node, data: { ...node.data, seconds: durationSeconds, label: `Wait ${formatDuration(durationSeconds * 1000)}` } }
+    }
+    if (node.data?.kind === 'wait' && timeoutSeconds && /\b(?:timeout|time out|wait)\b/.test(targetText)) {
+      return { ...node, data: { ...node.data, timeoutSeconds } }
+    }
+    if (node.data?.kind === 'time' && schedulePoint) {
+      return { ...node, data: { ...node.data, scheduleMode: 'at', atType: schedulePoint.type, at: schedulePoint.time, label: `At ${schedulePoint.label}${formatRecipeDaySuffix(scheduleDays)}`, days: scheduleDays.length ? scheduleDays : node.data.days } }
+    }
+    if (node.data?.kind === 'time' && scheduleDays.length && /\b(?:day|days|weekday|weekdays|weekend|weekends|schedule|time)\b/.test(targetText)) {
+      return { ...node, data: { ...node.data, days: scheduleDays, label: `${String(node.data.label || 'Schedule').replace(/\s+On\s+.+$/i, '')}${formatRecipeDaySuffix(scheduleDays)}` } }
+    }
+    if (node.data?.kind === 'service' && actionPayload !== '{}' && /\b(?:brightness|bright|dim|color|colour|temperature|payload|action|light)\b/.test(targetText)) {
+      return { ...node, data: { ...node.data, payload: actionPayload } }
+    }
+    if (node.data?.kind === 'notify' && /\b(?:message|text|notification|notify|alert)\b/.test(targetText)) {
+      return { ...node, data: { ...node.data, message: messageText, label } }
+    }
+    if (node.data?.kind === 'debug' && /\b(?:message|text|debug|log|trace)\b/.test(targetText)) {
+      return { ...node, data: { ...node.data, message: messageText, label } }
+    }
+    if (node.data?.kind === 'comment' && /\b(?:comment|note|text|message)\b/.test(targetText)) {
+      return { ...node, data: { ...node.data, text: messageText, label } }
+    }
+    const nextLabel = label.replace(new RegExp(escapeRegExp(oldLabel), 'i'), newLabel)
+    const nextData = { ...node.data, label: nextLabel === label ? `${label} ${newLabel}`.trim() : nextLabel }
+    if (node.data?.kind === 'service') nextData.domain = inferRecipeActionDomain(replacement.to)
+    return { ...node, data: nextData }
+  })
+
+  if (!changed) throw new Error('I could not find a matching node to change.')
+  return {
+    nodes: nextNodes,
+    edges: currentEdges,
+    summary: [`Changed ${oldLabel} to ${newLabel}.`],
+  }
+}
+
+function getRecipeRemovalTargets(instruction) {
+  const conditions = parseRecipeConditions(instruction)
+  const actions = parseRecipeActions(instruction)
+  const requestedNodes = parseRecipeNodeRequests(instruction)
+  const schedule = parseRecipeSchedule(instruction)
+  const waitSeconds = parseRecipeWait(instruction)
+  const waitUntil = parseRecipeWaitUntil(instruction)
+  const normalized = normalizeRecipeText(instruction)
+  const explicitKinds = getRecipeNodeKindsFromText(normalized)
+  return {
+    conditions,
+    actions,
+    requestedNodes,
+    explicitKinds,
+    schedule: Boolean(schedule) || /\b(?:time|schedule|window|night|sunset|sunrise|between|before|after)\b/.test(normalized),
+    wait: Boolean(waitUntil) || /\b(?:wait until)\b/.test(normalized),
+    delay: Boolean(waitSeconds) || /\b(?:delay|timer|pause)\b/.test(normalized),
+    rawLabels: cleanupRecipeEntityPhrase(normalized.replace(/\b(?:remove|delete|take out|drop|without|no longer)\b/g, ' ')).split(/\s+and\s+|\s*,\s*/).filter(Boolean),
+  }
+}
+
+function recipeNodeMatchesTargets(node, targets) {
+  const kind = node.data?.kind
+  const label = String(node.data?.label || '')
+  if (targets.explicitKinds.includes(kind)) return true
+  if (targets.schedule && kind === 'time') return true
+  if (targets.delay && kind === 'delay') return true
+  if (targets.wait && kind === 'wait') return true
+  if (targets.actions.some((action) => kind === 'service' && (labelMatchesRecipeText(label, action.label) || node.data?.service === action.service))) return true
+  if (targets.conditions.some((condition) => ['state', 'condition'].includes(kind) && labelMatchesRecipeText(label, condition.label))) return true
+  if (targets.requestedNodes.some((request) => kind === request.kind || labelMatchesRecipeText(label, request.label))) return true
+  return targets.rawLabels.some((target) => target.length > 2 && labelMatchesRecipeText(label, target))
+}
+
+function getRecipeNodeKindsFromText(normalized) {
+  return AUTOMATED_RECIPE_NODE_KNOWLEDGE
+    .filter((item) => item.words.some((word) => normalized.includes(word)))
+    .map((item) => item.kind)
+}
+
+function splitRecipeElseSections(text) {
+  const match = String(text || '').match(/\b(?:otherwise|else|if not|if false)\b/i)
+  if (!match) return { primary: text, otherwise: '' }
+  return {
+    primary: text.slice(0, match.index).trim(),
+    otherwise: text.slice((match.index ?? 0) + match[0].length).trim(),
+  }
+}
+
+function parseRecipeReplacement(instruction) {
+  const raw = String(instruction || '')
+  const normalized = normalizeRecipeText(raw)
+  const match = normalized.match(/\b(?:change|replace|switch|set|update)\s+(.+?)\s+(?:to|with|into)\s+(.+)$/)
+  if (!match) return null
+  const rawToMatch = raw.match(/\b(?:to|with|into)\s+(.+)$/i)
+  return {
+    from: cleanupRecipeEntityPhrase(match[1]),
+    to: cleanupRecipeEntityPhrase(match[2]),
+    rawTo: rawToMatch?.[1]?.trim() || match[2],
+  }
+}
+
+function rebuildLinearRecipeEdges(nextNodes, currentEdges) {
+  const sortedNodes = [...nextNodes].sort((first, second) => (
+    Number(first.position?.x || 0) - Number(second.position?.x || 0) ||
+    Number(first.position?.y || 0) - Number(second.position?.y || 0)
+  ))
+  const existingEdgeByPair = new Map(currentEdges.map((edge) => [`${edge.source}-${edge.target}`, edge]))
+  const nextEdges = []
+  for (let index = 0; index < sortedNodes.length - 1; index += 1) {
+    const source = sortedNodes[index]
+    const target = sortedNodes[index + 1]
+    const existingEdge = existingEdgeByPair.get(`${source.id}-${target.id}`)
+    nextEdges.push(existingEdge || {
+      id: `${source.id}-${target.id}`,
+      source: source.id,
+      sourceHandle: source.data?.kind === 'condition' ? 'true' : undefined,
+      target: target.id,
+      animated: true,
+    })
+  }
+  return nextEdges
+}
+
+function parseRecipeConditions(text) {
+  const normalized = normalizeRecipeText(text)
+  const matches = Array.from(normalized.matchAll(/\b(?:if|when|while|only if|provided)\s+(.+?)\s+(?:is|are|becomes|become|gets|get)\s+(open|closed|on|off|detected|clear|cleared|occupied|unoccupied|home|away|locked|unlocked)\b/g))
+  const unique = []
+  const addCondition = (phraseValue, stateValue) => {
+    const phrase = cleanupRecipeEntityPhrase(phraseValue)
+    const state = recipeStateToHomeAssistantState(stateValue)
+    if (!phrase) return
+    const label = formatRecipeLabel(phrase)
+    if (unique.some((condition) => condition.label.toLowerCase() === label.toLowerCase() && condition.state === state)) return
+    unique.push({ label, state })
+  }
+
+  for (const match of matches) {
+    addCondition(match[1], match[2])
+  }
+
+  const chainedMatches = Array.from(normalized.matchAll(/\b(?:and|or|with)\s+(.+?)\s+(?:is|are|becomes|become|gets|get)\s+(open|closed|on|off|detected|clear|cleared|occupied|unoccupied|home|away|locked|unlocked)\b/g))
+  for (const match of chainedMatches) {
+    addCondition(match[1], match[2])
+  }
+
+  const verbMatches = Array.from(normalized.matchAll(/\b(?:if|when|while|only if|provided|and|or|with)\s+(.+?)\s+(opens|closes|turns on|turns off|detects|clears|locks|unlocks)\b/g))
+  for (const match of verbMatches) {
+    addCondition(match[1], recipeVerbToState(match[2]))
+  }
+
+  const shorthandMatches = Array.from(normalized.matchAll(/\b(?:if|when|while|only if|provided)\s+(.+?)\s+(open|closed|detected|clear|cleared|occupied|unoccupied|locked|unlocked)\b/g))
+  for (const match of shorthandMatches) {
+    addCondition(match[1], match[2])
+  }
+
+  return unique
+}
+
+function parseRecipeActions(text) {
+  const normalized = normalizeRecipeText(text)
+  const matches = Array.from(normalized.matchAll(/\b(?:turn|switch)\s+(on|off)\s+(.+?)(?=\s+\b(?:but|only|if|when|while|between|after|before|provided|then)\b|[,.]|$)/g))
+  const serviceMatches = Array.from(normalized.matchAll(/\bcall\s+([a-z0-9_]+)\.([a-z0-9_]+)(?:\s+(?:on|for)\s+(.+?))?(?=\s+\b(?:but|only|if|when|while|between|after|before|provided|then)\b|[,.]|$)/g))
+  const commandMatches = Array.from(normalized.matchAll(/\b(open|close|lock|unlock)\s+(.+?)(?=\s+\b(?:but|only|if|when|while|between|after|before|provided|then)\b|[,.]|$)/g))
+  const setMatches = Array.from(normalized.matchAll(/\bset\s+(.+?)\s+to\s+(.+?)(?=\s+\b(?:but|only|if|when|while|between|after|before|provided|then)\b|[,.]|$)/g))
+  const actionPayload = buildRecipeActionPayload(normalized)
+  const actions = []
+  let lastTarget = ''
+
+  for (const match of matches) {
+    const service = match[1] === 'on' ? 'turn_on' : 'turn_off'
+    let phrase = cleanupRecipeActionPhrase(match[2])
+    if (isRecipePronounTarget(phrase)) phrase = lastTarget
+    if (!phrase) continue
+    lastTarget = phrase
+    actions.push({
+      domain: inferRecipeActionDomain(phrase),
+      label: formatRecipeLabel(phrase),
+      payload: actionPayload,
+      service,
+    })
+  }
+
+  for (const match of serviceMatches) {
+    let phrase = cleanupRecipeActionPhrase(match[3] || `${match[1]} ${match[2]}`)
+    if (isRecipePronounTarget(phrase)) phrase = lastTarget
+    if (!phrase) continue
+    lastTarget = phrase
+    actions.push({
+      domain: match[1],
+      label: formatRecipeLabel(phrase),
+      payload: actionPayload,
+      service: match[2],
+    })
+  }
+
+  for (const match of commandMatches) {
+    let phrase = cleanupRecipeActionPhrase(match[2])
+    if (isRecipePronounTarget(phrase)) phrase = lastTarget
+    if (phrase) lastTarget = phrase
+    const commandAction = buildRecipeCommandAction(match[1], phrase, actionPayload)
+    if (commandAction) actions.push(commandAction)
+  }
+
+  for (const match of setMatches) {
+    const setAction = buildRecipeSetAction(match[1], match[2])
+    if (setAction) actions.push(setAction)
+  }
+
+  return dedupeRecipeActions(actions)
+}
+
+function parseRecipeSchedule(text) {
+  const normalized = normalizeRecipeText(text)
+  const days = parseRecipeScheduleDays(normalized)
+  const between = normalized.match(/\bbetween\s+(sunset|sunrise|\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s+and\s+(sunset|sunrise|\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\b/)
+  if (between) {
+    const start = parseRecipeSchedulePoint(between[1])
+    const end = parseRecipeSchedulePoint(between[2])
+    const daySuffix = formatRecipeDaySuffix(days)
+    return {
+      label: `Between ${start.label} And ${end.label}${daySuffix}`,
+      data: {
+        scheduleMode: 'between',
+        startType: start.type,
+        startTime: start.time,
+        endType: end.type,
+        endTime: end.time,
+        days,
+      },
+    }
+  }
+
+  if (/\b(?:at night|overnight|after sunset|before sunrise|sunset to sunrise)\b/.test(normalized)) {
+    const daySuffix = formatRecipeDaySuffix(days)
+    return {
+      label: `Between Sunset And Sunrise${daySuffix}`,
+      data: { scheduleMode: 'between', startType: 'sunset', startTime: '19:00', endType: 'sunrise', endTime: '07:00', days },
+    }
+  }
+
+  const atTime = normalized.match(/\bat\s+(sunrise|sunset|\d{1,2}:\d{2}\s*(?:am|pm)?|\d{1,2}\s*(?:am|pm))\b/)
+  if (atTime) {
+    const point = parseRecipeSchedulePoint(atTime[1])
+    const daySuffix = formatRecipeDaySuffix(days)
+    return {
+      label: `At ${point.label}${daySuffix}`,
+      data: { scheduleMode: 'at', atType: point.type, at: point.time, days },
+    }
+  }
+
+  return null
+}
+
+function parseRecipeSchedulePoint(value) {
+  const normalized = String(value || '').trim().toLowerCase()
+  if (normalized === 'sunset' || normalized === 'sunrise') return { type: normalized, time: normalized === 'sunset' ? '19:00' : '07:00', label: formatAttributeName(normalized) }
+  const time = normalizeRecipeTime(normalized)
+  if (!time) return { type: 'time', time: '07:00', label: '07:00' }
+  return { type: 'time', time, label: time }
+}
+
+function parseRecipeScheduleDays(normalized) {
+  if (/\b(?:weekday|weekdays|workday|workdays|monday through friday|mon through fri|monday to friday|mon to fri)\b/.test(normalized)) return [1, 2, 3, 4, 5]
+  if (/\b(?:weekend|weekends|saturday and sunday|sat and sun)\b/.test(normalized)) return [0, 6]
+  const dayMap = new Map([
+    ['sunday', 0], ['sun', 0],
+    ['monday', 1], ['mon', 1],
+    ['tuesday', 2], ['tue', 2], ['tues', 2],
+    ['wednesday', 3], ['wed', 3],
+    ['thursday', 4], ['thu', 4], ['thur', 4], ['thurs', 4],
+    ['friday', 5], ['fri', 5],
+    ['saturday', 6], ['sat', 6],
+  ])
+  const selected = []
+  for (const [name, value] of dayMap) {
+    if (new RegExp(`\\b${name}\\b`).test(normalized)) selected.push(value)
+  }
+  return Array.from(new Set(selected)).sort((first, second) => first - second)
+}
+
+function formatRecipeDaySuffix(days) {
+  const label = formatScheduleDays(days)
+  return label ? ` On ${label}` : ''
+}
+
+function parseRecipeWait(text) {
+  const match = normalizeRecipeNumbers(text).match(/\b(?:delay|pause|wait|after|for)\s+(\d+)\s+(second|seconds|minute|minutes|hour|hours)\b/)
+  if (!match) return 0
+  const amount = Number(match[1])
+  const unit = match[2]
+  if (unit.startsWith('hour')) return amount * 3600
+  if (unit.startsWith('minute')) return amount * 60
+  return amount
+}
+
+function parseRecipeWaitUntil(text) {
+  const normalized = normalizeRecipeText(text)
+  const match = normalized.match(/\bwait\s+until\s+(.+?)\s+(?:is|are|becomes|become|gets|get)\s+(open|closed|on|off|detected|clear|cleared|occupied|unoccupied|home|away|locked|unlocked)\b/)
+  if (!match) return null
+  const label = formatRecipeLabel(match[1])
+  const state = recipeStateToHomeAssistantState(match[2])
+  const timeoutSeconds = parseRecipeTimeoutSeconds(normalized) || 300
+  return {
+    label: `Wait Until ${label} Is ${formatStateOption(state)}`,
+    data: { entityId: '', attribute: 'state', to: state, timeoutSeconds },
+    summary: `${label} is ${formatStateOption(state)} for up to ${formatDuration(timeoutSeconds * 1000)}`,
+  }
+}
+
+function parseRecipeNodeRequests(text) {
+  const normalized = normalizeRecipeText(text)
+  const requests = []
+  const addRequest = (request) => {
+    if (!request) return
+    if (requests.some((item) => item.kind === request.kind && item.label === request.label)) return
+    requests.push(request)
+  }
+
+  addRequest(parseRecipeEventNode(normalized))
+  addRequest(parseRecipeNotifyNode(text))
+  addRequest(parseRecipeSceneNode(text))
+  addRequest(parseRecipeDebugNode(text))
+  addRequest(parseRecipeCommentNode(text))
+  addRequest(parseRecipeEndNode(normalized))
+  addRequest(parseRecipeJoinNode(normalized))
+  addRequest(parseRecipeDirectionNode(normalized))
+  addRequest(parseRecipeGroupNode(normalized))
+
+  return requests
+}
+
+function parseRecipeEventNode(normalized) {
+  if (!/\b(?:event|home assistant event|state changed event)\b/.test(normalized)) return null
+  const eventTypeMatch = normalized.match(/\bevent(?: type)?\s+([a-z0-9_]+)\b/)
+  const eventType = eventTypeMatch?.[1] || 'state_changed'
+  return {
+    kind: 'event',
+    label: eventType === 'state_changed' ? 'Home Assistant Event' : `${formatRecipeLabel(eventType)} Event`,
+    data: { eventType, entityId: '', from: '', to: '' },
+    summary: `listen for ${eventType}`,
+  }
+}
+
+function parseRecipeNotifyNode(text) {
+  const normalized = normalizeRecipeText(text)
+  if (!/\b(?:notify|notification|alert|message me|send me|send a message)\b/.test(normalized)) return null
+  const message = extractRecipeQuotedText(text) || extractRecipeMessageText(normalized) || 'HAFlow ran'
+  return {
+    kind: 'notify',
+    label: 'Send Notification',
+    data: { message, notifyService: '', target: '', title: '', dataJson: '{}', pushoverPriority: '', pushoverSound: '' },
+    summary: `send notification "${message}"`,
+  }
+}
+
+function parseRecipeSceneNode(text) {
+  const normalized = normalizeRecipeText(text)
+  if (!/\b(?:scene|activate scene|turn on scene)\b/.test(normalized)) return null
+  const sceneMatch = normalized.match(/\b(?:activate|turn on|run|start)?\s*scene\s+(.+?)(?=\s+\b(?:then|and|but|only|if|when|while|between|after|before)\b|$)/)
+  const sceneName = cleanupRecipeEntityPhrase(sceneMatch?.[1] || '')
+  return {
+    kind: 'scene',
+    label: sceneName ? `Turn On ${formatRecipeLabel(sceneName)} Scene` : 'Turn On Scene',
+    data: { entityId: '' },
+    summary: sceneName ? `turn on ${formatRecipeLabel(sceneName)} scene` : 'turn on a scene',
+  }
+}
+
+function parseRecipeDebugNode(text) {
+  const normalized = normalizeRecipeText(text)
+  if (!/\b(?:debug|log|trace)\b/.test(normalized)) return null
+  const message = extractRecipeQuotedText(text) || extractRecipeMessageText(normalized) || 'Reached debug node'
+  return {
+    kind: 'debug',
+    label: 'Debug Log',
+    data: { message },
+    summary: `write "${message}" to the run log`,
+  }
+}
+
+function parseRecipeCommentNode(text) {
+  const normalized = normalizeRecipeText(text)
+  if (!/\b(?:comment|note|annotation)\b/.test(normalized)) return null
+  const note = extractRecipeQuotedText(text) || normalized.replace(/\b(?:add|create|a|an|comment|note|annotation|that|says|saying)\b/g, ' ').replace(/\s+/g, ' ').trim() || 'Add a note about this flow.'
+  return {
+    kind: 'comment',
+    label: 'Comment',
+    data: { text: sentenceCaseRecipeText(note) },
+    summary: sentenceCaseRecipeText(note),
+  }
+}
+
+function parseRecipeEndNode(normalized) {
+  if (!/\b(?:end|stop branch|stop here|finish branch)\b/.test(normalized)) return null
+  return {
+    kind: 'end',
+    label: 'End',
+    data: {},
+    summary: 'end this branch',
+  }
+}
+
+function parseRecipeJoinNode(normalized) {
+  if (/\b(?:or node|either path|any path|any incoming)\b/.test(normalized)) {
+    return { kind: 'or', label: 'OR', data: {}, summary: 'continue when any incoming path reaches it' }
+  }
+  if (/\b(?:and node|all paths|both paths|all incoming)\b/.test(normalized)) {
+    return { kind: 'and', label: 'AND', data: { activeStates: DIRECTION_ACTIVE_STATES }, summary: 'continue when all incoming paths are active' }
+  }
+  return null
+}
+
+function parseRecipeDirectionNode(normalized) {
+  if (!/\b(?:direction|movement|motion direction|a to b|b to a|in out|in or out)\b/.test(normalized)) return null
+  return {
+    kind: 'direction',
+    label: 'Direction',
+    data: { entityA: '', entityB: '', activeStates: DIRECTION_ACTIVE_STATES, directionAB: 'in', directionBA: 'out', targetEntityId: '' },
+    summary: 'compare two active entities and write the direction',
+  }
+}
+
+function parseRecipeGroupNode(normalized) {
+  if (!/\b(?:group|subflow|frame)\b/.test(normalized)) return null
+  return {
+    kind: 'group',
+    label: 'Subflow',
+    data: {},
+    summary: 'frame related nodes as a same-screen subflow',
+  }
+}
+
+function recipeStateToHomeAssistantState(value) {
+  const normalized = normalizeRecipeText(value)
+  const stateMap = {
+    open: 'on',
+    closed: 'off',
+    detected: 'on',
+    clear: 'off',
+    cleared: 'off',
+    occupied: 'on',
+    unoccupied: 'off',
+    home: 'home',
+    away: 'not_home',
+    locked: 'locked',
+    unlocked: 'unlocked',
+    on: 'on',
+    off: 'off',
+  }
+  return stateMap[normalized] || normalized
+}
+
+function recipeVerbToState(value) {
+  const normalized = normalizeRecipeText(value)
+  const stateMap = {
+    opens: 'open',
+    closes: 'closed',
+    'turns on': 'on',
+    'turns off': 'off',
+    detects: 'detected',
+    clears: 'clear',
+    locks: 'locked',
+    unlocks: 'unlocked',
+  }
+  return stateMap[normalized] || normalized
+}
+
+function oppositeState(state) {
+  const opposite = { on: 'off', off: 'on', open: 'closed', closed: 'open', locked: 'unlocked', unlocked: 'locked', home: 'not_home', not_home: 'home' }
+  return opposite[state] || ''
+}
+
+function cleanupRecipeEntityPhrase(value) {
+  return normalizeRecipeText(value)
+    .replace(/\b(?:the|a|an|my|our|that|this|to|from|then|and|or|is|are|becomes|become|gets|get)\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function cleanupRecipeActionPhrase(value) {
+  return cleanupRecipeEntityPhrase(value)
+    .replace(/\b(?:at|brightness|bright|dimmed?|color|colour|temperature|kelvin|percent|pct|rgb)\b.*$/g, ' ')
+    .replace(/\b\d{1,3}\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function isRecipePronounTarget(value) {
+  return /^(?:it|them|that|this|same one|same thing)$/.test(normalizeRecipeText(value))
+}
+
+function formatRecipeLabel(value) {
+  return cleanupRecipeEntityPhrase(value).split(' ').filter(Boolean).map(formatAttributeName).join(' ')
+}
+
+function labelMatchesRecipeText(label, target) {
+  const normalizedLabel = normalizeRecipeText(label)
+  const normalizedTarget = normalizeRecipeText(target)
+  if (!normalizedTarget) return false
+  if (normalizedLabel.includes(normalizedTarget)) return true
+  const targetTokens = normalizedTarget.split(' ').filter((token) => token.length > 2)
+  return targetTokens.length > 0 && targetTokens.every((token) => normalizedLabel.includes(token))
+}
+
+function recipeKindMatchesText(kind, text) {
+  if (!kind) return false
+  return AUTOMATED_RECIPE_NODE_KNOWLEDGE
+    .find((item) => item.kind === kind)
+    ?.words.some((word) => text.includes(word)) || text.includes(kind)
+}
+
+function extractRecipeQuotedText(value) {
+  const match = String(value || '').match(/["'](.+?)["']/)
+  return match?.[1]?.trim() || ''
+}
+
+function extractRecipeMessageText(normalized) {
+  const match = normalized.match(/\b(?:message|says|say|with text|text)\s+(.+)$/)
+  return match?.[1] ? sentenceCaseRecipeText(match[1]) : ''
+}
+
+function sentenceCaseRecipeText(value) {
+  const text = String(value || '').trim()
+  if (!text) return ''
+  return text.charAt(0).toUpperCase() + text.slice(1)
+}
+
+function parseRecipeDurationSeconds(value) {
+  const match = normalizeRecipeNumbers(value).match(/\b(\d+)\s*(second|seconds|minute|minutes|hour|hours)\b/)
+  if (!match) return 0
+  const amount = Number(match[1])
+  if (match[2].startsWith('hour')) return amount * 3600
+  if (match[2].startsWith('minute')) return amount * 60
+  return amount
+}
+
+function parseRecipeTimeoutSeconds(value) {
+  const normalized = normalizeRecipeNumbers(value)
+  const match = normalized.match(/\b(?:timeout|time out|give up|stop waiting)\s+(?:after|in)?\s*(\d+)\s*(second|seconds|minute|minutes|hour|hours)\b/)
+    || normalized.match(/\bfor up to\s+(\d+)\s*(second|seconds|minute|minutes|hour|hours)\b/)
+  if (!match) return 0
+  return parseRecipeDurationSeconds(`${match[1]} ${match[2]}`)
+}
+
+function parseRecipeTimeFromText(value) {
+  const normalized = normalizeRecipeText(value)
+  const match = normalized.match(/\b(sunrise|sunset|\d{1,2}:\d{2}\s*(?:am|pm)?|\d{1,2}\s*(?:am|pm))\b/)
+  return match ? parseRecipeSchedulePoint(match[1]) : null
+}
+
+function buildRecipeActionPayload(normalized) {
+  const payload = {}
+  const brightness = normalized.match(/\b(?:brightness|bright|dimmed?|at)\s+(?:to\s+)?(\d{1,3})\s*(?:percent|pct|%)\b/)
+  if (brightness) payload.brightness_pct = Math.max(0, Math.min(100, Number(brightness[1])))
+
+  const kelvin = normalized.match(/\b(?:color temperature|temperature|kelvin)\s+(?:to\s+)?(\d{3,5})\s*(?:k|kelvin)?\b/)
+  if (kelvin) payload.color_temp_kelvin = Number(kelvin[1])
+
+  const color = parseRecipeColor(normalized)
+  if (color) payload.rgb_color = color
+
+  return Object.keys(payload).length ? JSON.stringify(payload, null, 2) : '{}'
+}
+
+function parseRecipeColor(normalized) {
+  const colorMap = {
+    red: [255, 0, 0],
+    green: [0, 128, 0],
+    blue: [0, 0, 255],
+    purple: [128, 0, 128],
+    pink: [255, 105, 180],
+    orange: [255, 165, 0],
+    yellow: [255, 255, 0],
+    white: [255, 255, 255],
+    warm: [255, 214, 170],
+    cool: [180, 220, 255],
+  }
+  const hex = normalized.match(/#([0-9a-f]{6})\b/)
+  if (hex) {
+    const value = hex[1]
+    return [0, 2, 4].map((index) => parseInt(value.slice(index, index + 2), 16))
+  }
+  const rgb = normalized.match(/\brgb\s*(\d{1,3})\s+(\d{1,3})\s+(\d{1,3})\b/)
+  if (rgb) return [1, 2, 3].map((index) => Math.max(0, Math.min(255, Number(rgb[index]))))
+  const colorMatch = normalized.match(/\b(?:color|colour)\s+(?:to\s+)?([a-z]+)\b/)
+  const colorName = colorMatch?.[1] || Object.keys(colorMap).find((name) => new RegExp(`\\b${name}\\b`).test(normalized))
+  return colorName ? colorMap[colorName] : null
+}
+
+function buildRecipeCommandAction(command, value, actionPayload = '{}') {
+  const phrase = cleanupRecipeActionPhrase(value)
+  if (!phrase) return null
+  const domain = inferRecipeCommandDomain(command, phrase)
+  const service = getRecipeCommandService(command, domain)
+  return {
+    domain,
+    label: formatRecipeLabel(phrase),
+    payload: actionPayload,
+    service,
+  }
+}
+
+function buildRecipeSetAction(targetValue, value) {
+  const target = cleanupRecipeActionPhrase(targetValue)
+  const normalizedTarget = normalizeRecipeText(targetValue)
+  const normalizedValue = normalizeRecipeText(value)
+  if (!target) return null
+
+  if (/\b(?:thermostat|temperature|climate|heat|ac|air conditioner)\b/.test(normalizedTarget)) {
+    const temperature = normalizedValue.match(/\b(\d{2,3})(?:\s*degrees?)?\b/)
+    return {
+      domain: 'climate',
+      label: formatRecipeLabel(target),
+      payload: temperature ? JSON.stringify({ temperature: Number(temperature[1]) }, null, 2) : '{}',
+      service: 'set_temperature',
+    }
+  }
+
+  if (/\bfan\b/.test(normalizedTarget)) {
+    const percentage = normalizedValue.match(/\b(\d{1,3})\s*(?:percent|pct|%)?\b/)
+    return {
+      domain: 'fan',
+      label: formatRecipeLabel(target),
+      payload: percentage ? JSON.stringify({ percentage: Math.max(0, Math.min(100, Number(percentage[1]))) }, null, 2) : '{}',
+      service: 'set_percentage',
+    }
+  }
+
+  return {
+    domain: inferRecipeActionDomain(target),
+    label: formatRecipeLabel(target),
+    payload: buildRecipeActionPayload(`${normalizedTarget} ${normalizedValue}`),
+    service: 'turn_on',
+  }
+}
+
+function inferRecipeCommandDomain(command, phrase) {
+  const normalized = normalizeRecipeText(phrase)
+  if (['lock', 'unlock'].includes(command)) return 'lock'
+  if (/\b(?:garage|cover|blind|blinds|shade|shades|curtain|curtains|door|gate|window)\b/.test(normalized)) return 'cover'
+  return inferRecipeActionDomain(phrase)
+}
+
+function getRecipeCommandService(command, domain) {
+  if (domain === 'lock') return command === 'unlock' ? 'unlock' : 'lock'
+  if (domain === 'cover') return command === 'close' ? 'close_cover' : 'open_cover'
+  return ['close', 'lock'].includes(command) ? 'turn_off' : 'turn_on'
+}
+
+function dedupeRecipeActions(actions) {
+  const seen = new Set()
+  return actions.filter((action) => {
+    const key = `${action.domain}.${action.service}:${action.label}:${action.payload}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+function inferRecipeActionDomain(value) {
+  const normalized = normalizeRecipeText(value)
+  if (/\b(?:thermostat|climate|heat|ac|air conditioner)\b/.test(normalized)) return 'climate'
+  if (/\b(?:garage|cover|blind|blinds|shade|shades|curtain|curtains)\b/.test(normalized)) return 'cover'
+  if (/\b(?:lock|deadbolt)\b/.test(normalized)) return 'lock'
+  if (/\bfan\b/.test(normalized)) return 'fan'
+  if (/\b(?:helper|boolean|input boolean)\b/.test(normalized)) return 'input_boolean'
+  if (/\bswitch\b/.test(normalized)) return 'switch'
+  return 'light'
+}
+
+function normalizeRecipeText(value) {
+  return String(value || '').toLowerCase().replace(/[_-]/g, ' ').replace(/[^\w\s:#%]/g, ' ').replace(/\s+/g, ' ').trim()
+}
+
+function normalizeRecipeNumbers(value) {
+  const numberWords = {
+    zero: 0,
+    one: 1,
+    two: 2,
+    three: 3,
+    four: 4,
+    five: 5,
+    six: 6,
+    seven: 7,
+    eight: 8,
+    nine: 9,
+    ten: 10,
+    eleven: 11,
+    twelve: 12,
+    thirteen: 13,
+    fourteen: 14,
+    fifteen: 15,
+    sixteen: 16,
+    seventeen: 17,
+    eighteen: 18,
+    nineteen: 19,
+    twenty: 20,
+    thirty: 30,
+    forty: 40,
+    fifty: 50,
+    sixty: 60,
+    ninety: 90,
+  }
+  return normalizeRecipeText(value).replace(/\b(zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|ninety)\b/g, (word) => String(numberWords[word]))
+}
+
+function escapeRegExp(value) {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function normalizeRecipeTime(value) {
+  const match = String(value || '').trim().toLowerCase().match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/)
+  if (!match) return ''
+  let hours = Number(match[1])
+  const minutes = Number(match[2] || 0)
+  if (match[3] === 'pm' && hours < 12) hours += 12
+  if (match[3] === 'am' && hours === 12) hours = 0
+  if (hours > 23 || minutes > 59) return ''
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`
+}
+
+function titleFromRecipeText(text) {
+  const words = normalizeRecipeText(text).split(' ').filter(Boolean).slice(0, 7)
+  return words.length ? words.map(formatAttributeName).join(' ') : 'Generated Recipe'
+}
+
 function isDeviceCatalogItem(entity) {
   return entity?.catalogType === 'device' && entity.deviceId
 }
@@ -1340,6 +2288,9 @@ function FlowWorkspace() {
   const [isRecipeModalOpen, setIsRecipeModalOpen] = useState(false)
   const [selectedRecipeId, setSelectedRecipeId] = useState(FLOW_RECIPES[0]?.id || '')
   const [recipeValues, setRecipeValues] = useState({})
+  const [recipeDescription, setRecipeDescription] = useState('')
+  const [recipeDescriptionResult, setRecipeDescriptionResult] = useState(null)
+  const [recipeVoiceStatus, setRecipeVoiceStatus] = useState('idle')
   const [logQuery, setLogQuery] = useState('')
   const [nodeTestResult, setNodeTestResult] = useState(null)
   const [isFlowMenuOpen, setIsFlowMenuOpen] = useState(false)
@@ -1351,6 +2302,8 @@ function FlowWorkspace() {
   const hasNodeSelection = selectedNodeIds.length > 0
   const activeFlow = flows.find((flow) => flow.id === activeFlowId)
   const selectedRecipe = FLOW_RECIPES.find((recipe) => recipe.id === selectedRecipeId) ?? FLOW_RECIPES[0]
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+  const canDictateRecipe = Boolean(SpeechRecognition)
   const notifyServiceOptions = useMemo(() => {
     const names = services.notify ? Object.keys(services.notify).sort() : []
     return [{ value: '', label: 'Default notification service' }, ...names.map((name) => ({ value: name, label: `notify.${name}` }))]
@@ -2143,6 +3096,31 @@ function FlowWorkspace() {
     setLogs((current) => [{ time: new Date().toISOString(), level: 'info', message: `Added ${result.importedIds?.length ?? 0} Starter flows.` }, ...current])
   }
 
+  const saveRecipeFlow = async (baseName, generated, successMessage) => {
+    if (!generated.nodes.length) throw new Error('Recipe did not create any nodes.')
+    const flowName = getUniqueFlowName(baseName, flows)
+    const createResponse = await apiFetch('/api/flows', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: flowName }),
+    })
+    const createResult = await createResponse.json()
+    if (!createResponse.ok) throw new Error(createResult.error || 'Recipe flow could not be created.')
+    const flowId = createResult.flow.id
+    const viewport = { x: 0, y: 0, zoom: 0.85 }
+    const saveResponse = await apiFetch(`/api/flows/${flowId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...generated, viewport }),
+    })
+    const saveResult = await saveResponse.json()
+    if (!saveResponse.ok) throw new Error(saveResult.error || 'Recipe flow could not be saved.')
+    setFlows(createResult.flows ?? [])
+    setIsRecipeModalOpen(false)
+    await loadFlow(flowId)
+    setLogs((current) => [{ time: new Date().toISOString(), level: 'info', message: successMessage(flowName) }, ...current])
+  }
+
   const createRecipeFlow = async () => {
     if (!selectedRecipe) return
     const missingField = selectedRecipe.fields.find((field) => !recipeValues[field.id])
@@ -2153,30 +3131,64 @@ function FlowWorkspace() {
 
     try {
       const generated = buildRecipeFlow(selectedRecipe, recipeValues, entities)
-      if (!generated.nodes.length) throw new Error('Recipe did not create any nodes.')
-      const flowName = getUniqueFlowName(selectedRecipe.name, flows)
-      const createResponse = await apiFetch('/api/flows', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: flowName }),
-      })
-      const createResult = await createResponse.json()
-      if (!createResponse.ok) throw new Error(createResult.error || 'Recipe flow could not be created.')
-      const flowId = createResult.flow.id
-      const viewport = { x: 0, y: 0, zoom: 0.85 }
-      const saveResponse = await apiFetch(`/api/flows/${flowId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...generated, viewport }),
-      })
-      const saveResult = await saveResponse.json()
-      if (!saveResponse.ok) throw new Error(saveResult.error || 'Recipe flow could not be saved.')
-      setFlows(createResult.flows ?? [])
-      setIsRecipeModalOpen(false)
-      await loadFlow(flowId)
-      setLogs((current) => [{ time: new Date().toISOString(), level: 'info', message: `Created ${flowName} from the ${selectedRecipe.name} recipe.` }, ...current])
+      await saveRecipeFlow(selectedRecipe.name, generated, (flowName) => `Created ${flowName} from the ${selectedRecipe.name} recipe.`)
     } catch (error) {
       setLogs((current) => [{ time: new Date().toISOString(), level: 'error', message: error.message }, ...current])
+    }
+  }
+
+  const createAutomatedRecipeFlow = async () => {
+    setRecipeDescriptionResult(null)
+    try {
+      const generated = buildAutomatedRecipeFlow(recipeDescription)
+      await saveRecipeFlow(generated.flowName, generated, (flowName) => `Created ${flowName} from the described recipe.`)
+      setRecipeDescription('')
+    } catch (error) {
+      setRecipeDescriptionResult({ status: 'error', title: 'Recipe needs more detail', details: [error.message] })
+      setLogs((current) => [{ time: new Date().toISOString(), level: 'warn', message: error.message }, ...current])
+    }
+  }
+
+  const dictateRecipeDescription = () => {
+    if (!SpeechRecognition) {
+      setRecipeDescriptionResult({ status: 'warn', title: 'Speech not available', details: ['This browser does not support built-in speech recognition.'] })
+      return
+    }
+
+    const recognition = new SpeechRecognition()
+    recognition.lang = navigator.language || 'en-US'
+    recognition.interimResults = false
+    recognition.maxAlternatives = 1
+    setRecipeVoiceStatus('listening')
+    recognition.onresult = (event) => {
+      const transcript = event.results?.[0]?.[0]?.transcript?.trim()
+      if (transcript) {
+        setRecipeDescription((current) => `${current.trim()}${current.trim() ? ' ' : ''}${transcript}`.trim())
+        setRecipeDescriptionResult(null)
+      }
+    }
+    recognition.onerror = (event) => {
+      setRecipeDescriptionResult({ status: 'warn', title: 'Speech stopped', details: [event.error || 'Speech recognition did not return text.'] })
+    }
+    recognition.onend = () => setRecipeVoiceStatus('idle')
+    recognition.start()
+  }
+
+  const adjustCurrentRecipeFlow = () => {
+    setRecipeDescriptionResult(null)
+    try {
+      const generated = adjustAutomatedRecipeFlow(recipeDescription, nodes, edges)
+      setNodes(generated.nodes)
+      setEdges(generated.edges)
+      setSelectedId(null)
+      setSelectedNodeIds([])
+      setSelectedEdgeId(null)
+      setSaveStatus('dirty')
+      setRecipeDescriptionResult({ status: 'pass', title: 'Current flow adjusted', details: generated.summary })
+      setLogs((current) => [{ time: new Date().toISOString(), level: 'info', message: `Adjusted ${activeFlow?.name || 'current flow'} from the described recipe change.` }, ...current])
+    } catch (error) {
+      setRecipeDescriptionResult({ status: 'error', title: 'Adjustment needs more detail', details: [error.message] })
+      setLogs((current) => [{ time: new Date().toISOString(), level: 'warn', message: error.message }, ...current])
     }
   }
 
@@ -2763,13 +3775,53 @@ function FlowWorkspace() {
             <header>
               <div>
                 <strong>Flow Recipes</strong>
-                <span>Create a new editable flow from real Home Assistant entities.</span>
+                <span>Create a new editable flow from a description or selected Home Assistant entities.</span>
               </div>
               <div className="log-modal-actions">
                 <button onClick={() => setIsRecipeModalOpen(false)} title="Close recipes" type="button"><X size={18} /></button>
               </div>
             </header>
             <div className="recipe-modal-body">
+              <section className="automated-recipe">
+                <div className="recipe-beta-note">
+                  Creating recipes is in Beta. Your feedback is welcome!
+                </div>
+                <label>
+                  Describe The Flow You Want
+                  <div className="recipe-description-input">
+                    <textarea
+                      onChange={(event) => {
+                        setRecipeDescription(event.target.value)
+                        setRecipeDescriptionResult(null)
+                      }}
+                      placeholder="If front door is open, turn on the hallway light but only between sunset and sunrise"
+                      rows={3}
+                      value={recipeDescription}
+                    />
+                    <button
+                      className={recipeVoiceStatus === 'listening' ? 'is-listening' : ''}
+                      disabled={!canDictateRecipe || recipeVoiceStatus === 'listening'}
+                      onClick={dictateRecipeDescription}
+                      title={canDictateRecipe ? 'Dictate recipe description' : 'Speech recognition is not available in this browser'}
+                      type="button"
+                    >
+                      <Mic size={16} />
+                      {recipeVoiceStatus === 'listening' ? 'Listening' : 'Dictate'}
+                    </button>
+                  </div>
+                </label>
+                {recipeDescriptionResult ? (
+                  <div className={`node-test-result ${recipeDescriptionResult.status || 'info'}`}>
+                    <strong>{recipeDescriptionResult.title}</strong>
+                    {(recipeDescriptionResult.details ?? []).map((detail, index) => <span key={`${detail}-${index}`}>{detail}</span>)}
+                  </div>
+                ) : null}
+                <div className="automated-recipe-actions">
+                  <button className="primary-action" disabled={!recipeDescription.trim()} onClick={createAutomatedRecipeFlow} type="button">Create New Flow</button>
+                  <button disabled={!recipeDescription.trim() || !nodes.length} onClick={adjustCurrentRecipeFlow} type="button">Adjust Current Flow</button>
+                </div>
+              </section>
+              <div className="recipe-divider">Or choose a ready-made recipe</div>
               <label>
                 Recipe
                 <select value={selectedRecipe?.id || ''} onChange={(event) => {

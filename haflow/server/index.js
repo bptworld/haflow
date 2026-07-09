@@ -316,6 +316,32 @@ app.post('/api/starter-pack', async (_, res) => {
   res.json({ flows: await readFlowIndex(), activeFlowId: config.activeFlowId ?? 'default', importedIds })
 })
 
+app.post('/api/voice/flow', async (req, res) => {
+  try {
+    const name = String(req.body?.name || req.body?.flow || req.body?.description || 'Voice Flow').trim()
+    const result = await createGeneratedFlow(name, { nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 0.85 } })
+    log('info', `Voice created flow ${result.flow.name}.`)
+    res.json({ ok: true, ...result, speech: `Created HAFlow flow ${result.flow.name}.` })
+  } catch (error) {
+    log('error', error.message)
+    res.status(400).json({ ok: false, error: error.message, speech: `I could not create that flow. ${error.message}` })
+  }
+})
+
+app.post('/api/voice/recipe', async (req, res) => {
+  try {
+    const description = String(req.body?.recipe || req.body?.description || req.body?.flow || '').trim()
+    if (!description) throw new Error('Missing recipe description.')
+    const generated = buildVoiceRecipeFlow(description)
+    const result = await createGeneratedFlow(generated.flowName, generated)
+    log('info', `Voice created recipe flow ${result.flow.name}.`)
+    res.json({ ok: true, ...result, summary: generated.summary, speech: `Created HAFlow recipe ${result.flow.name}.` })
+  } catch (error) {
+    log('error', error.message)
+    res.status(400).json({ ok: false, error: error.message, speech: `I could not create that recipe. ${error.message}` })
+  }
+})
+
 app.get('/api/logs', (_, res) => {
   res.json({ logs })
 })
@@ -1970,6 +1996,458 @@ function log(level, message) {
   logs = [entry, ...logs].slice(0, 200)
   writeJson(logPath, logs).catch(() => {})
   broadcast({ type: 'log', entry })
+}
+
+async function createGeneratedFlow(baseName, generated) {
+  const flows = await readFlowIndex()
+  const name = ensureUniqueFlowName(baseName || 'Voice Flow', flows)
+  const flow = normalizeFlowMeta({
+    id: ensureUniqueFlowId(slugifyFlowId(name), flows),
+    name,
+    createdAt: new Date().toISOString(),
+  })
+  const flowData = normalizeFlow({
+    nodes: generated.nodes ?? [],
+    edges: generated.edges ?? [],
+    viewport: normalizeViewport(generated.viewport || { x: 0, y: 0, zoom: 0.85 }),
+  })
+  await writeFlow(flow.id, flowData)
+  await writeFlowIndex([...flows, flow])
+  config = { ...config, activeFlowId: flow.id }
+  await writeJson(configPath, config)
+  cachedFlow = flowData
+  cachedFlowMeta = flow
+  invalidateRunnableFlowCache()
+  broadcastRunner()
+  return { flow, flows: await readFlowIndex(), activeFlowId: flow.id }
+}
+
+function buildVoiceRecipeFlow(description) {
+  const text = String(description || '').trim()
+  const sections = splitVoiceElseSections(text)
+  const conditions = parseVoiceConditions(sections.primary)
+  const actions = parseVoiceActions(sections.primary)
+  const elseActions = sections.otherwise ? parseVoiceActions(sections.otherwise) : []
+  const schedule = parseVoiceSchedule(text)
+  const delaySeconds = parseVoiceDelay(sections.primary)
+  const waitUntil = parseVoiceWaitUntil(sections.primary)
+
+  if (!conditions.length && !schedule) throw new Error('Say when the flow should start, like "when bathroom door closes".')
+  if (!actions.length && !elseActions.length && !waitUntil) throw new Error('Say what the flow should do, like "turn on vanity lights".')
+
+  const nodes = []
+  const edges = []
+  const prefix = `voice-recipe-${crypto.randomUUID().slice(0, 8)}`
+  const addNode = (kind, label, x, data = {}) => {
+    const id = `${prefix}-${kind}-${nodes.length + 1}`
+    nodes.push({ id, type: 'haflow', position: { x, y: 120 }, data: { kind, label, ...data } })
+    return id
+  }
+  const connect = (source, target, sourceHandle) => edges.push({ id: `${source}-${target}`, source, sourceHandle, target, animated: true })
+
+  let x = 80
+  let previousId = ''
+  let lastConditionId = ''
+  const [triggerCondition, ...extraConditions] = conditions
+  if (triggerCondition) {
+    previousId = addNode('state', `${triggerCondition.label} ${voiceTitle(triggerCondition.stateLabel)}`, x, {
+      entityId: '',
+      from: oppositeVoiceState(triggerCondition.state),
+      to: triggerCondition.state,
+      triggers: [{ id: `${prefix}-trigger-rule`, entityId: '', from: oppositeVoiceState(triggerCondition.state), to: triggerCondition.state }],
+    })
+    x += 300
+  }
+
+  if (schedule) {
+    const scheduleId = addNode('time', schedule.label, x, schedule.data)
+    if (previousId) connect(previousId, scheduleId)
+    previousId = scheduleId
+    x += 300
+  }
+
+  for (const condition of extraConditions) {
+    const conditionId = addNode('condition', `${condition.label} Is ${voiceTitle(condition.stateLabel)}`, x, {
+      conditionMode: 'all',
+      entityId: '',
+      attribute: 'state',
+      operator: 'equals',
+      value: condition.state,
+      conditions: [{ id: `${prefix}-condition-${nodes.length + 1}`, entityId: '', attribute: 'state', operator: 'equals', value: condition.state }],
+    })
+    if (previousId) connect(previousId, conditionId)
+    previousId = conditionId
+    lastConditionId = conditionId
+    x += 300
+  }
+
+  if (delaySeconds && actions.length <= 1) {
+    const delayId = addNode('delay', `Wait ${formatVoiceDuration(delaySeconds)}`, x, { seconds: delaySeconds })
+    if (previousId) connect(previousId, delayId)
+    previousId = delayId
+    x += 300
+  }
+
+  if (waitUntil) {
+    const waitId = addNode('wait', waitUntil.label, x, waitUntil.data)
+    if (previousId) connect(previousId, waitId)
+    previousId = waitId
+    x += 300
+  }
+
+  actions.forEach((action, index) => {
+    const actionX = x + (index * 300) + (delaySeconds && actions.length > 1 && index > 0 ? 300 : 0)
+    const actionId = addNode('service', `${voiceTitle(action.service)} ${action.label}`, actionX, {
+      domain: action.domain,
+      service: action.service,
+      entityId: '',
+      entityIds: [],
+      payload: action.payload,
+    })
+    if (previousId) connect(previousId, actionId, previousId.includes('condition') ? 'true' : undefined)
+    previousId = actionId
+    if (delaySeconds && actions.length > 1 && index === 0) {
+      const delayId = addNode('delay', `Wait ${formatVoiceDuration(delaySeconds)}`, actionX + 300, { seconds: delaySeconds })
+      connect(previousId, delayId)
+      previousId = delayId
+    }
+  })
+  if (actions.length) x += (actions.length + (delaySeconds && actions.length > 1 ? 1 : 0)) * 300
+
+  elseActions.forEach((action, index) => {
+    const actionId = addNode('service', `Otherwise ${voiceTitle(action.service)} ${action.label}`, x + (index * 300), {
+      domain: action.domain,
+      service: action.service,
+      entityId: '',
+      entityIds: [],
+      payload: action.payload,
+    })
+    if (lastConditionId) connect(lastConditionId, actionId, 'false')
+  })
+
+  return {
+    flowName: voiceFlowName(text),
+    nodes,
+    edges,
+    viewport: { x: 0, y: 0, zoom: 0.85 },
+    summary: [
+      triggerCondition ? `Trigger: ${triggerCondition.label} ${triggerCondition.stateLabel}` : '',
+      schedule ? `Schedule: ${schedule.label}` : '',
+      ...extraConditions.map((condition) => `Condition: ${condition.label} ${condition.stateLabel}`),
+      delaySeconds ? `Delay: ${formatVoiceDuration(delaySeconds)}` : '',
+      waitUntil ? `Wait: ${waitUntil.summary}` : '',
+      ...actions.map((action) => `Action: ${voiceTitle(action.service)} ${action.label}`),
+      ...elseActions.map((action) => `Otherwise: ${voiceTitle(action.service)} ${action.label}`),
+    ].filter(Boolean),
+  }
+}
+
+function splitVoiceElseSections(text) {
+  const match = String(text || '').match(/\b(?:otherwise|else|if not|if false)\b/i)
+  if (!match) return { primary: text, otherwise: '' }
+  return {
+    primary: text.slice(0, match.index).trim(),
+    otherwise: text.slice((match.index ?? 0) + match[0].length).trim(),
+  }
+}
+
+function parseVoiceConditions(text) {
+  const normalized = normalizeVoiceText(text)
+  const conditions = []
+  const addCondition = (phrase, stateValue) => {
+    const label = voiceTitle(cleanVoiceTarget(phrase))
+    const state = voiceState(stateValue)
+    if (!label) return
+    if (conditions.some((item) => item.label === label && item.state === state)) return
+    conditions.push({ label, state, stateLabel: voiceStateLabel(stateValue) })
+  }
+
+  for (const match of normalized.matchAll(/\b(?:if|when|while|only if|provided|and|or|with)\s+(.+?)\s+(?:is|are|becomes|become|gets|get)\s+(open|closed|on|off|detected|clear|cleared|occupied|unoccupied|home|away|locked|unlocked)\b/g)) {
+    addCondition(match[1], match[2])
+  }
+  for (const match of normalized.matchAll(/\b(?:if|when|while|only if|provided|and|or|with)\s+(.+?)\s+(opens|closes|turns on|turns off|detects|clears|locks|unlocks)\b/g)) {
+    addCondition(match[1], voiceVerbState(match[2]))
+  }
+  for (const match of normalized.matchAll(/\b(?:if|when|while|only if|provided)\s+(.+?)\s+(open|closed|detected|clear|cleared|occupied|unoccupied|locked|unlocked)\b/g)) {
+    addCondition(match[1], match[2])
+  }
+  return conditions
+}
+
+function parseVoiceActions(text) {
+  const normalized = normalizeVoiceText(text)
+  const payload = buildVoiceActionPayload(normalized)
+  const actions = []
+  let lastTarget = ''
+  const addAction = (domain, service, target, actionPayload = payload) => {
+    let cleanTarget = cleanVoiceActionTarget(target)
+    if (isVoicePronoun(cleanTarget)) cleanTarget = lastTarget
+    if (!cleanTarget) return
+    lastTarget = cleanTarget
+    actions.push({ domain, service, label: voiceTitle(cleanTarget), payload: actionPayload })
+  }
+
+  for (const match of normalized.matchAll(/\b(?:turn|switch)\s+(on|off)\s+(.+?)(?=\s+\b(?:but|only|if|when|while|between|after|before|provided|then|otherwise|else)\b|[,.]|$)/g)) {
+    const target = cleanVoiceActionTarget(match[2])
+    addAction(inferVoiceDomain(target), match[1] === 'on' ? 'turn_on' : 'turn_off', target)
+  }
+  for (const match of normalized.matchAll(/\bcall\s+([a-z0-9_]+)\.([a-z0-9_]+)(?:\s+(?:on|for)\s+(.+?))?(?=\s+\b(?:but|only|if|when|while|between|after|before|provided|then|otherwise|else)\b|[,.]|$)/g)) {
+    addAction(match[1], match[2], match[3] || `${match[1]} ${match[2]}`)
+  }
+  for (const match of normalized.matchAll(/\b(open|close|lock|unlock)\s+(.+?)(?=\s+\b(?:but|only|if|when|while|between|after|before|provided|then|otherwise|else)\b|[,.]|$)/g)) {
+    const target = cleanVoiceActionTarget(match[2])
+    const domain = ['lock', 'unlock'].includes(match[1]) ? 'lock' : /\b(?:garage|cover|blind|shade|curtain|door|gate|window)\b/.test(target) ? 'cover' : inferVoiceDomain(target)
+    const service = domain === 'lock'
+      ? match[1] === 'unlock' ? 'unlock' : 'lock'
+      : domain === 'cover'
+        ? match[1] === 'close' ? 'close_cover' : 'open_cover'
+        : ['close', 'lock'].includes(match[1]) ? 'turn_off' : 'turn_on'
+    addAction(domain, service, target)
+  }
+  for (const match of normalized.matchAll(/\bset\s+(.+?)\s+to\s+(.+?)(?=\s+\b(?:but|only|if|when|while|between|after|before|provided|then|otherwise|else)\b|[,.]|$)/g)) {
+    const target = cleanVoiceActionTarget(match[1])
+    const value = normalizeVoiceText(match[2])
+    if (/\b(?:thermostat|temperature|climate|heat|ac|air conditioner)\b/.test(target)) {
+      const temperature = value.match(/\b(\d{2,3})(?:\s*degrees?)?\b/)
+      addAction('climate', 'set_temperature', target, temperature ? JSON.stringify({ temperature: Number(temperature[1]) }, null, 2) : '{}')
+    } else if (/\bfan\b/.test(target)) {
+      const percentage = value.match(/\b(\d{1,3})\s*(?:percent|pct|%)?\b/)
+      addAction('fan', 'set_percentage', target, percentage ? JSON.stringify({ percentage: Math.max(0, Math.min(100, Number(percentage[1]))) }, null, 2) : '{}')
+    } else {
+      addAction(inferVoiceDomain(target), 'turn_on', target, buildVoiceActionPayload(`${target} ${value}`))
+    }
+  }
+
+  const seen = new Set()
+  return actions.filter((action) => {
+    const key = `${action.domain}.${action.service}:${action.label}:${action.payload}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+function parseVoiceSchedule(text) {
+  const normalized = normalizeVoiceText(text)
+  const days = parseVoiceDays(normalized)
+  const between = normalized.match(/\bbetween\s+(sunset|sunrise|\d{1,2}:\d{2}\s*(?:am|pm)?|\d{1,2}\s*(?:am|pm))\s+and\s+(sunset|sunrise|\d{1,2}:\d{2}\s*(?:am|pm)?|\d{1,2}\s*(?:am|pm))\b/)
+  if (between) {
+    const start = voiceSchedulePoint(between[1])
+    const end = voiceSchedulePoint(between[2])
+    return {
+      label: `Between ${start.label} And ${end.label}${voiceDaySuffix(days)}`,
+      data: { scheduleMode: 'between', startType: start.type, startTime: start.time, endType: end.type, endTime: end.time, days },
+    }
+  }
+  if (/\b(?:at night|overnight|after sunset|before sunrise|sunset to sunrise)\b/.test(normalized)) {
+    return {
+      label: `Between Sunset And Sunrise${voiceDaySuffix(days)}`,
+      data: { scheduleMode: 'between', startType: 'sunset', startTime: '19:00', endType: 'sunrise', endTime: '07:00', days },
+    }
+  }
+  const atTime = normalized.match(/\bat\s+(sunrise|sunset|\d{1,2}:\d{2}\s*(?:am|pm)?|\d{1,2}\s*(?:am|pm))\b/)
+  if (!atTime) return null
+  const point = voiceSchedulePoint(atTime[1])
+  return { label: `At ${point.label}${voiceDaySuffix(days)}`, data: { scheduleMode: 'at', atType: point.type, at: point.time, days } }
+}
+
+function parseVoiceDelay(text) {
+  const match = normalizeVoiceNumbers(text).match(/\b(?:delay|pause|wait|after|for)\s+(\d+)\s+(second|seconds|minute|minutes|hour|hours)\b/)
+  return match ? voiceDurationSeconds(match[1], match[2]) : 0
+}
+
+function parseVoiceWaitUntil(text) {
+  const normalized = normalizeVoiceNumbers(text)
+  const match = normalized.match(/\bwait\s+until\s+(.+?)\s+(?:is|are|becomes|become|gets|get)\s+(open|closed|on|off|detected|clear|cleared|occupied|unoccupied|home|away|locked|unlocked)\b/)
+  if (!match) return null
+  const label = voiceTitle(cleanVoiceTarget(match[1]))
+  const state = voiceState(match[2])
+  const timeout = voiceTimeoutSeconds(normalized) || 300
+  return {
+    label: `Wait Until ${label} Is ${voiceTitle(voiceStateLabel(match[2]))}`,
+    data: { entityId: '', attribute: 'state', to: state, timeoutSeconds: timeout },
+    summary: `${label} is ${voiceStateLabel(match[2])} for up to ${formatVoiceDuration(timeout)}`,
+  }
+}
+
+function voiceState(value) {
+  const normalized = normalizeVoiceText(value)
+  return {
+    open: 'on',
+    closed: 'off',
+    detected: 'on',
+    clear: 'off',
+    cleared: 'off',
+    occupied: 'on',
+    unoccupied: 'off',
+    away: 'not_home',
+    on: 'on',
+    off: 'off',
+    home: 'home',
+    locked: 'locked',
+    unlocked: 'unlocked',
+  }[normalized] || normalized
+}
+
+function voiceStateLabel(value) {
+  const normalized = normalizeVoiceText(value)
+  return { opens: 'open', closes: 'closed', detects: 'detected', clears: 'clear', locks: 'locked', unlocks: 'unlocked', 'turns on': 'on', 'turns off': 'off' }[normalized] || normalized
+}
+
+function voiceVerbState(value) {
+  return voiceStateLabel(value)
+}
+
+function oppositeVoiceState(state) {
+  return { on: 'off', off: 'on', locked: 'unlocked', unlocked: 'locked', home: 'not_home', not_home: 'home' }[state] || ''
+}
+
+function cleanVoiceTarget(value) {
+  return normalizeVoiceText(value)
+    .replace(/\b(?:the|a|an|my|our|that|this|to|from|then|and|or|is|are|becomes|become|gets|get)\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function cleanVoiceActionTarget(value) {
+  return cleanVoiceTarget(value)
+    .replace(/\b(?:at|brightness|bright|dimmed?|color|colour|temperature|kelvin|percent|pct|rgb)\b.*$/g, ' ')
+    .replace(/\b\d{1,3}\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function isVoicePronoun(value) {
+  return /^(?:it|them|that|this|same one|same thing)$/.test(normalizeVoiceText(value))
+}
+
+function voiceTitle(value) {
+  return cleanVoiceTarget(value).split(' ').filter(Boolean).map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')
+}
+
+function voiceFlowName(text) {
+  const words = normalizeVoiceText(text).split(' ').filter(Boolean).slice(0, 7)
+  return words.length ? words.map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(' ') : 'Voice Recipe'
+}
+
+function parseVoiceDays(normalized) {
+  if (/\b(?:weekday|weekdays|workday|workdays|monday through friday|mon through fri|monday to friday|mon to fri)\b/.test(normalized)) return [1, 2, 3, 4, 5]
+  if (/\b(?:weekend|weekends|saturday and sunday|sat and sun)\b/.test(normalized)) return [0, 6]
+  const dayMap = new Map([
+    ['sunday', 0], ['sun', 0],
+    ['monday', 1], ['mon', 1],
+    ['tuesday', 2], ['tue', 2], ['tues', 2],
+    ['wednesday', 3], ['wed', 3],
+    ['thursday', 4], ['thu', 4], ['thur', 4], ['thurs', 4],
+    ['friday', 5], ['fri', 5],
+    ['saturday', 6], ['sat', 6],
+  ])
+  const selected = []
+  for (const [name, value] of dayMap) {
+    if (new RegExp(`\\b${name}\\b`).test(normalized)) selected.push(value)
+  }
+  return Array.from(new Set(selected)).sort((first, second) => first - second)
+}
+
+function voiceDaySuffix(days) {
+  if (!Array.isArray(days) || !days.length || days.length === 7) return ''
+  const labels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+  return ` On ${days.map((day) => labels[day]).join(', ')}`
+}
+
+function voiceSchedulePoint(value) {
+  const normalized = normalizeVoiceText(value)
+  if (normalized === 'sunrise' || normalized === 'sunset') return { type: normalized, time: normalized === 'sunset' ? '19:00' : '07:00', label: voiceTitle(normalized) }
+  const time = normalizeVoiceTime(normalized) || '07:00'
+  return { type: 'time', time, label: time }
+}
+
+function buildVoiceActionPayload(normalized) {
+  const payload = {}
+  const brightness = normalized.match(/\b(?:brightness|bright|dimmed?|at)\s+(?:to\s+)?(\d{1,3})\s*(?:percent|pct|%)\b/)
+  if (brightness) payload.brightness_pct = Math.max(0, Math.min(100, Number(brightness[1])))
+  const kelvin = normalized.match(/\b(?:color temperature|temperature|kelvin)\s+(?:to\s+)?(\d{3,5})\s*(?:k|kelvin)?\b/)
+  if (kelvin) payload.color_temp_kelvin = Number(kelvin[1])
+  const color = parseVoiceColor(normalized)
+  if (color) payload.rgb_color = color
+  return Object.keys(payload).length ? JSON.stringify(payload, null, 2) : '{}'
+}
+
+function parseVoiceColor(normalized) {
+  const colorMap = {
+    red: [255, 0, 0],
+    green: [0, 128, 0],
+    blue: [0, 0, 255],
+    purple: [128, 0, 128],
+    pink: [255, 105, 180],
+    orange: [255, 165, 0],
+    yellow: [255, 255, 0],
+    white: [255, 255, 255],
+    warm: [255, 214, 170],
+    cool: [180, 220, 255],
+  }
+  const hex = normalized.match(/#([0-9a-f]{6})\b/)
+  if (hex) return [0, 2, 4].map((index) => parseInt(hex[1].slice(index, index + 2), 16))
+  const rgb = normalized.match(/\brgb\s*(\d{1,3})\s+(\d{1,3})\s+(\d{1,3})\b/)
+  if (rgb) return [1, 2, 3].map((index) => Math.max(0, Math.min(255, Number(rgb[index]))))
+  const colorMatch = normalized.match(/\b(?:color|colour)\s+(?:to\s+)?([a-z]+)\b/)
+  const colorName = colorMatch?.[1] || Object.keys(colorMap).find((name) => new RegExp(`\\b${name}\\b`).test(normalized))
+  return colorName ? colorMap[colorName] : null
+}
+
+function inferVoiceDomain(value) {
+  const normalized = normalizeVoiceText(value)
+  if (/\b(?:thermostat|climate|heat|ac|air conditioner)\b/.test(normalized)) return 'climate'
+  if (/\b(?:garage|cover|blind|blinds|shade|shades|curtain|curtains)\b/.test(normalized)) return 'cover'
+  if (/\b(?:lock|deadbolt)\b/.test(normalized)) return 'lock'
+  if (/\bfan\b/.test(normalized)) return 'fan'
+  if (/\b(?:helper|boolean|input boolean)\b/.test(normalized)) return 'input_boolean'
+  if (/\bswitch\b/.test(normalized)) return 'switch'
+  return 'light'
+}
+
+function formatVoiceDuration(seconds) {
+  if (seconds >= 3600 && seconds % 3600 === 0) return `${seconds / 3600} hour${seconds === 3600 ? '' : 's'}`
+  if (seconds >= 60 && seconds % 60 === 0) return `${seconds / 60} minute${seconds === 60 ? '' : 's'}`
+  return `${seconds} second${seconds === 1 ? '' : 's'}`
+}
+
+function voiceTimeoutSeconds(value) {
+  const normalized = normalizeVoiceNumbers(value)
+  const match = normalized.match(/\b(?:timeout|time out|give up|stop waiting)\s+(?:after|in)?\s*(\d+)\s*(second|seconds|minute|minutes|hour|hours)\b/)
+    || normalized.match(/\bfor up to\s+(\d+)\s*(second|seconds|minute|minutes|hour|hours)\b/)
+  return match ? voiceDurationSeconds(match[1], match[2]) : 0
+}
+
+function voiceDurationSeconds(amountValue, unit) {
+  const amount = Number(amountValue)
+  if (String(unit).startsWith('hour')) return amount * 3600
+  if (String(unit).startsWith('minute')) return amount * 60
+  return amount
+}
+
+function normalizeVoiceTime(value) {
+  const match = String(value || '').trim().toLowerCase().match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/)
+  if (!match) return ''
+  let hours = Number(match[1])
+  const minutes = Number(match[2] || 0)
+  if (match[3] === 'pm' && hours < 12) hours += 12
+  if (match[3] === 'am' && hours === 12) hours = 0
+  if (hours > 23 || minutes > 59) return ''
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`
+}
+
+function normalizeVoiceText(value) {
+  return String(value || '').toLowerCase().replace(/[_-]/g, ' ').replace(/[^\w\s:#%]/g, ' ').replace(/\s+/g, ' ').trim()
+}
+
+function normalizeVoiceNumbers(value) {
+  const numberWords = {
+    zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+    eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19,
+    twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, ninety: 90,
+  }
+  return normalizeVoiceText(value).replace(/\b(zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|ninety)\b/g, (word) => String(numberWords[word]))
 }
 
 function broadcast(payload) {

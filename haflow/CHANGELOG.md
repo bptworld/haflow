@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.1.52
+
+- Add a Beta note to Recipe/Voice creation surfaces inviting user feedback.
+
+## 0.1.51
+
+- Split the production frontend bundle into React, React Flow, icons, vendor, and app chunks to remove the Vite chunk-size warning.
+- Add voice pipeline API endpoints for creating a blank flow or a described recipe flow from Home Assistant Assist.
+- Add voice pipeline setup notes for Home Assistant custom sentences and REST commands.
+
+## 0.1.50
+
+- Add browser speech dictation for described recipes when speech recognition is available.
+- Improve spoken-style recipe handling for number words, pronoun targets, and "turn on, wait, turn off" action sequences.
+
+## 0.1.49
+
+- Expand described recipe command support for open, close, lock, unlock, climate temperature, fan percentage, and otherwise/else branches.
+- Keep brightness phrasing such as "at 50%" from being mistaken for a schedule time.
+
+## 0.1.48
+
+- Let described recipes fill schedule day filters, Action brightness/color payloads, and Wait timeout values from natural wording.
+
+## 0.1.47
+
+- Improve described recipe phrasing so trigger verbs, chained conditions, direct service calls, and message/delay/time follow-up edits are understood more naturally.
+
+## 0.1.46
+
+- Teach described recipes the full HAFlow node vocabulary so they can create and adjust Trigger, Event, Schedule, Condition, OR, AND, Direction, Group, Comment, Delay, Wait, End, Action, Notify, Scene, and Debug nodes.
+
+## 0.1.45
+
+- Let described recipes adjust the current flow from follow-up requests to add, remove, or change generated nodes.
+
+## 0.1.44
+
+- Add a described recipe creator that turns plain-language automation requests into editable flow nodes.
+- Generate node skeletons from descriptions while leaving Home Assistant entities and services for the user to choose in each node.
+
 ## 0.1.43
 
 - Add a Test Selected Node action that previews what the selected node would do without running the full flow or calling services.
