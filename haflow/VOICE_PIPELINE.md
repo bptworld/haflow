@@ -4,6 +4,8 @@ HAFlow exposes voice-friendly API endpoints that Home Assistant Assist can call 
 
 Creating recipes is in Beta. Your feedback is welcome!
 
+HAFlow exposes port `4177` for voice REST commands. After installing this app version, restart/reinstall HAFlow if Home Assistant has not picked up the new port mapping yet.
+
 ## Endpoints
 
 ### Create A Blank Flow

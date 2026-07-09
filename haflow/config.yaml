@@ -14,6 +14,10 @@ boot: auto
 init: false
 ingress: true
 ingress_port: 4177
+ports:
+  4177/tcp: 4177
+ports_description:
+  4177/tcp: "HAFlow web and API"
 panel_icon: "mdi:cable-data"
 homeassistant_api: true
 options: {}

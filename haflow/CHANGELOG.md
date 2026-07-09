@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.53
+
+- Expose HAFlow port 4177 so Home Assistant voice REST commands can call the web/API endpoint directly.
+
 ## 0.1.52
 
 - Add a Beta note to Recipe/Voice creation surfaces inviting user feedback.
