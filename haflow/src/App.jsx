@@ -1210,6 +1210,106 @@ function getRecipeEntityLabel(entities, entityId) {
   return entity?.friendlyName || entityId
 }
 
+function buildRecipeEntityHints(entities = []) {
+  return entities
+    .filter((entity) => entity?.entity_id && entity.catalogType !== 'device')
+    .flatMap((entity) => {
+      const entityId = String(entity.entity_id)
+      const domain = entity.domain || entityId.split('.')[0]
+      const names = new Set([
+        entity.friendlyName,
+        entity.attributes?.friendly_name,
+        entity.name,
+        entityId.split('.').slice(1).join('.').replace(/_/g, ' '),
+      ].filter(Boolean).map(String))
+      return Array.from(names).map((name) => ({ name, entityId, domain }))
+    })
+}
+
+function withResolvedRecipeEntity(item, entityHints, preferredDomains = []) {
+  const match = resolveRecipeEntityHint(item.label, entityHints, preferredDomains)
+  if (!match) return item
+  return {
+    ...item,
+    ...(match.confident ? { entityId: match.entityId, domain: item.domain || match.domain } : {}),
+    ...(match.suggestions.length ? { entitySuggestions: match.suggestions } : {}),
+  }
+}
+
+function resolveRecipeEntityHint(label, entityHints = [], preferredDomains = []) {
+  const normalizedLabel = normalizeRecipeText(label)
+  if (!normalizedLabel) return null
+  const allowedDomains = new Set(preferredDomains.filter(Boolean))
+  const matches = entityHints
+    .map((hint) => {
+      const entityId = String(hint.entityId || hint.entity_id || '')
+      const name = String(hint.name || hint.friendlyName || hint.friendly_name || '')
+      const domain = String(hint.domain || entityId.split('.')[0] || '')
+      const normalizedName = normalizeRecipeText(name)
+      const normalizedEntity = normalizeRecipeText(entityId.split('.').slice(1).join(' ').replace(/_/g, ' '))
+      const exact = normalizedName === normalizedLabel || normalizedEntity === normalizedLabel
+      const contains = normalizedName.includes(normalizedLabel) || normalizedLabel.includes(normalizedName) || normalizedEntity.includes(normalizedLabel)
+      const close = recipeTextSimilarity(normalizedLabel, normalizedName) >= 0.45 || recipeTextSimilarity(normalizedLabel, normalizedEntity) >= 0.45
+      if (!entityId || (!exact && !contains && !close)) return null
+      const domainScore = !allowedDomains.size || allowedDomains.has(domain) ? 20 : 0
+      const exactScore = exact ? 40 : 0
+      const containsScore = contains ? 24 : 0
+      const closeScore = close ? 12 : 0
+      const lengthScore = Math.max(0, 20 - Math.abs(normalizedName.length - normalizedLabel.length))
+      return { entityId, domain, name, confident: exact || (contains && domainScore > 0), score: domainScore + exactScore + containsScore + closeScore + lengthScore }
+    })
+    .filter(Boolean)
+    .sort((first, second) => second.score - first.score || first.entityId.localeCompare(second.entityId))
+  if (!matches.length) return null
+  const suggestions = matches.slice(0, 5).map(({ entityId, domain, name }) => ({ entityId, domain, name }))
+  return { ...matches[0], suggestions }
+}
+
+function getRecipeConditionDomains(state) {
+  if (['locked', 'unlocked'].includes(state)) return ['lock']
+  return ['binary_sensor', 'input_boolean', 'switch', 'sensor', 'cover', 'lock', 'person', 'device_tracker']
+}
+
+function recipeTextSimilarity(firstValue, secondValue) {
+  const firstTokens = normalizeRecipeMatchTokens(firstValue)
+  const secondTokens = normalizeRecipeMatchTokens(secondValue)
+  if (!firstTokens.length || !secondTokens.length) return 0
+  const matchedSecondIndexes = new Set()
+  let score = 0
+  for (const firstToken of firstTokens) {
+    const matchIndex = secondTokens.findIndex((secondToken, index) => !matchedSecondIndexes.has(index) && recipeTokensMatch(firstToken, secondToken))
+    if (matchIndex >= 0) {
+      matchedSecondIndexes.add(matchIndex)
+      score += firstToken === secondTokens[matchIndex] ? 1 : 0.72
+    }
+  }
+  return score / Math.max(firstTokens.length, secondTokens.length)
+}
+
+function normalizeRecipeMatchTokens(value) {
+  const aliases = {
+    bath: 'bathroom',
+    br: 'bedroom',
+    dim: 'dimmer',
+    dr: 'door',
+    kit: 'kitchen',
+    lr: 'living room',
+    rm: 'room',
+    tv: 'television',
+  }
+  return normalizeRecipeText(value)
+    .split(' ')
+    .flatMap((token) => (aliases[token] || token).split(' '))
+    .filter((token) => token.length > 1)
+}
+
+function recipeTokensMatch(firstToken, secondToken) {
+  if (firstToken === secondToken) return true
+  if (firstToken.length >= 3 && secondToken.startsWith(firstToken)) return true
+  if (secondToken.length >= 3 && firstToken.startsWith(secondToken)) return true
+  return false
+}
+
 function buildRecipeFlow(recipe, values, entities) {
   const label = (entityId) => getRecipeEntityLabel(entities, entityId)
   const id = (name) => `${recipe.id}-${name}-${createId().slice(0, 8)}`
@@ -1281,14 +1381,14 @@ function buildRecipeFlow(recipe, values, entities) {
   return { nodes: [], edges: [] }
 }
 
-function buildAutomatedRecipeFlow(description, { allowPartial = false } = {}) {
+function buildAutomatedRecipeFlow(description, { allowPartial = false, entityHints = [] } = {}) {
   const text = String(description || '').trim()
   if (!text) throw new Error('Describe the flow you want to create.')
 
   const recipeSections = splitRecipeElseSections(text)
-  const conditions = parseRecipeConditions(recipeSections.primary)
-  const actions = parseRecipeActions(recipeSections.primary)
-  const elseActions = recipeSections.otherwise ? parseRecipeActions(recipeSections.otherwise) : []
+  const conditions = parseRecipeConditions(recipeSections.primary).map((condition) => withResolvedRecipeEntity(condition, entityHints, getRecipeConditionDomains(condition.state)))
+  const actions = parseRecipeActions(recipeSections.primary).map((action) => withResolvedRecipeEntity(action, entityHints, [action.domain]))
+  const elseActions = recipeSections.otherwise ? parseRecipeActions(recipeSections.otherwise).map((action) => withResolvedRecipeEntity(action, entityHints, [action.domain])) : []
   const schedule = parseRecipeSchedule(text)
   const waitSeconds = parseRecipeWait(recipeSections.primary)
   const waitUntil = parseRecipeWaitUntil(recipeSections.primary)
@@ -1322,7 +1422,9 @@ function buildAutomatedRecipeFlow(description, { allowPartial = false } = {}) {
       entityId: '',
       from: oppositeState(triggerCondition.state),
       to: triggerCondition.state,
-      triggers: [{ id: `${prefix}-trigger-rule`, entityId: '', from: oppositeState(triggerCondition.state), to: triggerCondition.state }],
+      ...(triggerCondition.entityId ? { entityId: triggerCondition.entityId } : {}),
+      ...(triggerCondition.entitySuggestions ? { entitySuggestions: triggerCondition.entitySuggestions } : {}),
+      triggers: [{ id: `${prefix}-trigger-rule`, entityId: triggerCondition.entityId || '', from: oppositeState(triggerCondition.state), to: triggerCondition.state }],
     })
     previousId = triggerId
     x += 300
@@ -1342,7 +1444,12 @@ function buildAutomatedRecipeFlow(description, { allowPartial = false } = {}) {
       attribute: 'state',
       operator: 'equals',
       value: condition.state,
+      ...(condition.entitySuggestions ? { entitySuggestions: condition.entitySuggestions } : {}),
       conditions: [{ id: `${prefix}-condition-${createId().slice(0, 6)}`, entityId: '', attribute: 'state', operator: 'equals', value: condition.state }],
+      ...(condition.entityId ? {
+        entityId: condition.entityId,
+        conditions: [{ id: `${prefix}-condition-${createId().slice(0, 6)}`, entityId: condition.entityId, attribute: 'state', operator: 'equals', value: condition.state }],
+      } : {}),
     })
     if (previousId) connect(previousId, conditionId)
     previousId = conditionId
@@ -1369,8 +1476,9 @@ function buildAutomatedRecipeFlow(description, { allowPartial = false } = {}) {
     const actionId = addNode('service', `${formatAttributeName(action.service)} ${action.label}`, actionX, {
       domain: action.domain,
       service: action.service,
-      entityId: '',
-      entityIds: [],
+      entityId: action.entityId || '',
+      entityIds: action.entityId ? [action.entityId] : [],
+      ...(action.entitySuggestions ? { entitySuggestions: action.entitySuggestions } : {}),
       payload: action.payload,
     })
     if (previousId) connect(previousId, actionId, previousId.includes('condition') ? 'true' : undefined)
@@ -1387,8 +1495,9 @@ function buildAutomatedRecipeFlow(description, { allowPartial = false } = {}) {
     const actionId = addNode('service', `Otherwise ${formatAttributeName(action.service)} ${action.label}`, x + (index * 300), {
       domain: action.domain,
       service: action.service,
-      entityId: '',
-      entityIds: [],
+      entityId: action.entityId || '',
+      entityIds: action.entityId ? [action.entityId] : [],
+      ...(action.entitySuggestions ? { entitySuggestions: action.entitySuggestions } : {}),
       payload: action.payload,
     })
     if (lastConditionId) connect(lastConditionId, actionId, 'false')
@@ -1418,7 +1527,7 @@ function buildAutomatedRecipeFlow(description, { allowPartial = false } = {}) {
   }
 }
 
-function adjustAutomatedRecipeFlow(instruction, currentNodes, currentEdges) {
+function adjustAutomatedRecipeFlow(instruction, currentNodes, currentEdges, entityHints = []) {
   const text = String(instruction || '').trim()
   if (!text) throw new Error('Describe what to add, remove, or change.')
   const normalized = normalizeRecipeText(text)
@@ -1432,7 +1541,7 @@ function adjustAutomatedRecipeFlow(instruction, currentNodes, currentEdges) {
     return replaceAutomatedRecipeText(replacement, currentNodes, currentEdges)
   }
 
-  const fragment = buildAutomatedRecipeFlow(text, { allowPartial: true })
+  const fragment = buildAutomatedRecipeFlow(text, { allowPartial: true, entityHints })
   return appendAutomatedRecipeParts(fragment, currentNodes, currentEdges)
 }
 
@@ -1608,7 +1717,7 @@ function rebuildLinearRecipeEdges(nextNodes, currentEdges) {
 
 function parseRecipeConditions(text) {
   const normalized = normalizeRecipeText(text)
-  const matches = Array.from(normalized.matchAll(/\b(?:if|when|while|only if|provided)\s+(.+?)\s+(?:is|are|becomes|become|gets|get)\s+(open|closed|on|off|detected|clear|cleared|occupied|unoccupied|home|away|locked|unlocked)\b/g))
+  const matches = Array.from(normalized.matchAll(/\b(?:if|when|while|only if|provided)\s+(.+?)\s+(?:is|are|becomes|become|gets|get)\s+(open|opened|closed|on|off|detected|clear|cleared|occupied|unoccupied|home|away|locked|unlocked)\b/g))
   const unique = []
   const addCondition = (phraseValue, stateValue) => {
     const phrase = cleanupRecipeEntityPhrase(phraseValue)
@@ -1623,7 +1732,7 @@ function parseRecipeConditions(text) {
     addCondition(match[1], match[2])
   }
 
-  const chainedMatches = Array.from(normalized.matchAll(/\b(?:and|or|with)\s+(.+?)\s+(?:is|are|becomes|become|gets|get)\s+(open|closed|on|off|detected|clear|cleared|occupied|unoccupied|home|away|locked|unlocked)\b/g))
+  const chainedMatches = Array.from(normalized.matchAll(/\b(?:and|or|with)\s+(.+?)\s+(?:is|are|becomes|become|gets|get)\s+(open|opened|closed|on|off|detected|clear|cleared|occupied|unoccupied|home|away|locked|unlocked)\b/g))
   for (const match of chainedMatches) {
     addCondition(match[1], match[2])
   }
@@ -1633,7 +1742,7 @@ function parseRecipeConditions(text) {
     addCondition(match[1], recipeVerbToState(match[2]))
   }
 
-  const shorthandMatches = Array.from(normalized.matchAll(/\b(?:if|when|while|only if|provided)\s+(.+?)\s+(open|closed|detected|clear|cleared|occupied|unoccupied|locked|unlocked)\b/g))
+  const shorthandMatches = Array.from(normalized.matchAll(/\b(?:if|when|while|only if|provided)\s+(.+?)\s+(open|opened|closed|detected|clear|cleared|occupied|unoccupied|locked|unlocked)\b/g))
   for (const match of shorthandMatches) {
     addCondition(match[1], match[2])
   }
@@ -1780,7 +1889,7 @@ function parseRecipeWait(text) {
 
 function parseRecipeWaitUntil(text) {
   const normalized = normalizeRecipeText(text)
-  const match = normalized.match(/\bwait\s+until\s+(.+?)\s+(?:is|are|becomes|become|gets|get)\s+(open|closed|on|off|detected|clear|cleared|occupied|unoccupied|home|away|locked|unlocked)\b/)
+  const match = normalized.match(/\bwait\s+until\s+(.+?)\s+(?:is|are|becomes|become|gets|get)\s+(open|opened|closed|on|off|detected|clear|cleared|occupied|unoccupied|home|away|locked|unlocked)\b/)
   if (!match) return null
   const label = formatRecipeLabel(match[1])
   const state = recipeStateToHomeAssistantState(match[2])
@@ -1919,6 +2028,7 @@ function recipeStateToHomeAssistantState(value) {
   const normalized = normalizeRecipeText(value)
   const stateMap = {
     open: 'on',
+    opened: 'on',
     closed: 'off',
     detected: 'on',
     clear: 'off',
@@ -3224,7 +3334,7 @@ function FlowWorkspace() {
   const createAutomatedRecipeFlow = async () => {
     setRecipeDescriptionResult(null)
     try {
-      const generated = buildAutomatedRecipeFlow(recipeDescription)
+      const generated = buildAutomatedRecipeFlow(recipeDescription, { entityHints: buildRecipeEntityHints(entities) })
       await saveRecipeFlow(generated.flowName, generated, (flowName) => `Created ${flowName} from the described recipe.`)
       setRecipeDescription('')
     } catch (error) {
@@ -3261,7 +3371,7 @@ function FlowWorkspace() {
   const adjustCurrentRecipeFlow = () => {
     setRecipeDescriptionResult(null)
     try {
-      const generated = adjustAutomatedRecipeFlow(recipeDescription, nodes, edges)
+      const generated = adjustAutomatedRecipeFlow(recipeDescription, nodes, edges, buildRecipeEntityHints(entities))
       setNodes(generated.nodes)
       setEdges(generated.edges)
       setSelectedId(null)
@@ -4112,6 +4222,32 @@ function StateValueSelect({ entity, options, placeholder, value, onChange }) {
   )
 }
 
+function EntitySuggestionSelect({ entities, suggestions = [], onSelect }) {
+  const options = suggestions
+    .map((suggestion) => {
+      const entityId = suggestion.entityId || suggestion.entity_id
+      const entity = entities.find((item) => item.entity_id === entityId)
+      return entityId ? { entityId, entity, suggestion } : null
+    })
+    .filter(Boolean)
+
+  if (!options.length) return null
+
+  return (
+    <label className="entity-suggestion-select">
+      Suggested entity
+      <select value="" onChange={(event) => event.target.value && onSelect(event.target.value)}>
+        <option value="">Choose close match</option>
+        {options.map(({ entityId, entity, suggestion }) => (
+          <option key={entityId} value={entityId}>
+            {entity?.areaName || 'Unassigned'} / {entity?.deviceType || suggestion.domain || 'Entity'} / {entity?.friendlyName || suggestion.name || entityId}
+          </option>
+        ))}
+      </select>
+    </label>
+  )
+}
+
 function SchedulePointEditor({ data, field, label, updateNodeData }) {
   const typeKey = field === 'at' ? 'atType' : `${field}Type`
   const timeKey = field === 'at' ? 'at' : `${field}Time`
@@ -4196,6 +4332,54 @@ function Inspector({ entities, node, nodeTestResult, onTestNode, services, updat
     if (['state', 'event'].includes(data.kind) && entity && ['on', 'off'].includes(entity.state) && !data.to) patch.to = 'on'
     updateNodeData(patch)
   }
+  const applySuggestedEntity = (entityId) => {
+    const entity = entities.find((item) => item.entity_id === entityId)
+    if (data.kind === 'service') {
+      const entityIds = Array.from(new Set([...(data.entityIds ?? []), entityId]))
+      updateNodeData({
+        entityIds,
+        entityId: entityIds[0],
+        label: entityIds.length === 1 ? (entity?.friendlyName || entityId) : `${entityIds.length} Actions`,
+        entitySuggestions: [],
+        ...getActionServicePatch(entityIds, data.service, services),
+      })
+      return
+    }
+
+    if (data.kind === 'state') {
+      const rules = getStateTriggerRules(data)
+      const nextRules = rules.length
+        ? rules.map((rule, index) => index === 0 ? { ...rule, entityId } : rule)
+        : [{ id: `${node.id}-suggested-trigger`, entityId, from: data.from ?? '', to: data.to ?? '' }]
+      updateNodeData({
+        triggers: nextRules,
+        entityId,
+        label: entity?.friendlyName || data.label,
+        entitySuggestions: [],
+      })
+      return
+    }
+
+    if (data.kind === 'condition') {
+      const rules = getConditionRules(data)
+      const nextRules = rules.length
+        ? rules.map((rule, index) => index === 0 ? { ...rule, entityId } : rule)
+        : [{ id: `${node.id}-suggested-condition`, entityId, attribute: data.attribute ?? 'state', operator: data.operator ?? 'equals', value: data.value ?? '' }]
+      updateNodeData({
+        conditions: nextRules,
+        entityId,
+        label: entity?.friendlyName || data.label,
+        entitySuggestions: [],
+      })
+      return
+    }
+
+    updateNodeData({
+      entityId,
+      label: entity?.friendlyName || data.label,
+      entitySuggestions: [],
+    })
+  }
   const clearEntity = () => {
     if (data.kind === 'event') updateNodeData({ entityId: '', from: '', to: '', label: getCatalogLabel(data.kind) })
     else updateNodeData({ entityId: '', attribute: 'state', to: '', value: '', label: getCatalogLabel(data.kind) })
@@ -4228,6 +4412,9 @@ function Inspector({ entities, node, nodeTestResult, onTestNode, services, updat
           {(nodeTestResult.details ?? []).map((detail, index) => <span key={`${detail}-${index}`}>{detail}</span>)}
         </div>
       ) : null}
+      {!data.entityId && !(data.entityIds ?? []).length && (
+        <EntitySuggestionSelect entities={entities} onSelect={applySuggestedEntity} suggestions={data.entitySuggestions} />
+      )}
       {['scene', 'service', 'wait'].includes(data.kind) && (
         <>
           <label>

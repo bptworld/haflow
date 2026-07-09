@@ -45,6 +45,8 @@ HAFlow is a Home Assistant app for building and running flow-based automations.
 - Import starter flow packs.
 - Create new editable flows from guided recipes using real Home Assistant entities.
 - Create editable node skeletons from plain-language recipe descriptions, then fill in the exact Home Assistant data in each node.
+- Prefill described Recipe and Voice flows by entity ID when Home Assistant entity hints or matching entity names are available.
+- Show close entity matches as suggested dropdowns when a described Recipe or Voice flow cannot confidently choose the exact entity.
 - Adjust the current flow from follow-up recipe requests that add, remove, or change generated nodes.
 - Understand the full HAFlow node vocabulary when creating and adjusting described recipes.
 - Understand natural follow-up phrasing for trigger verbs, chained conditions, direct service calls, message text, delays, and schedule times.
@@ -52,6 +54,7 @@ HAFlow is a Home Assistant app for building and running flow-based automations.
 - Understand broader action commands such as open, close, lock, unlock, set thermostat temperature, set fan percentage, and otherwise/else branches.
 - Dictate described recipes in browsers with built-in speech recognition, including spoken number words and pronoun follow-ups.
 - Create blank flows or described recipe flows from Home Assistant Assist through voice pipeline API endpoints.
+- Pass resolved Home Assistant entity hints into voice recipes so generated nodes can target exact entity IDs.
 - Watch all saved, unpaused flows with the automatic runner, not only the currently open flow.
 
 ## Voice Pipeline

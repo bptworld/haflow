@@ -332,7 +332,8 @@ app.post('/api/voice/recipe', async (req, res) => {
   try {
     const description = String(req.body?.recipe || req.body?.description || req.body?.flow || '').trim()
     if (!description) throw new Error('Missing recipe description.')
-    const generated = buildVoiceRecipeFlow(description)
+    const entityHints = await getVoiceRecipeEntityHints(req.body)
+    const generated = buildVoiceRecipeFlow(description, { entityHints })
     if (req.body?.dryRun) {
       return res.json({ ok: true, summary: generated.summary, speech: 'HAFlow understood the recipe.' })
     }
@@ -2025,12 +2026,143 @@ async function createGeneratedFlow(baseName, generated) {
   return { flow, flows: await readFlowIndex(), activeFlowId: flow.id }
 }
 
-function buildVoiceRecipeFlow(description) {
+async function getVoiceRecipeEntityHints(body = {}) {
+  const explicitHints = normalizeVoiceEntityHints([
+    body.entities,
+    body.entityHints,
+    body.resolvedEntities,
+    body.slots?.entities,
+    body.slots?.entity,
+  ].flatMap((value) => Array.isArray(value) ? value : value ? [value] : []))
+  if (explicitHints.length) return explicitHints
+
+  try {
+    const states = await haRest('/api/states')
+    return normalizeVoiceEntityHints(states.map((state) => ({
+      entity_id: state.entity_id,
+      name: state.attributes?.friendly_name,
+    })))
+  } catch {
+    return []
+  }
+}
+
+function normalizeVoiceEntityHints(items = []) {
+  const hints = []
+  const seen = new Set()
+  for (const item of items) {
+    if (!item) continue
+    const entityId = String(item.entity_id || item.entityId || item.id || item.value || '').trim()
+    if (!entityId.includes('.')) continue
+    const domain = String(item.domain || entityId.split('.')[0] || '')
+    const names = new Set([
+      item.name,
+      item.friendly_name,
+      item.friendlyName,
+      item.label,
+      item.text,
+      entityId.split('.').slice(1).join('.').replace(/_/g, ' '),
+    ].filter(Boolean).map(String))
+    for (const name of names) {
+      const key = `${entityId}:${normalizeVoiceText(name)}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      hints.push({ entityId, domain, name })
+    }
+  }
+  return hints
+}
+
+function withResolvedVoiceEntity(item, entityHints, preferredDomains = []) {
+  const match = resolveVoiceEntityHint(item.label, entityHints, preferredDomains)
+  if (!match) return item
+  return {
+    ...item,
+    ...(match.confident ? { entityId: match.entityId, domain: item.domain || match.domain } : {}),
+    ...(match.suggestions.length ? { entitySuggestions: match.suggestions } : {}),
+  }
+}
+
+function resolveVoiceEntityHint(label, entityHints = [], preferredDomains = []) {
+  const normalizedLabel = normalizeVoiceText(label)
+  if (!normalizedLabel) return null
+  const allowedDomains = new Set(preferredDomains.filter(Boolean))
+  const matches = entityHints
+    .map((hint) => {
+      const entityId = String(hint.entityId || hint.entity_id || '')
+      const name = String(hint.name || hint.friendlyName || hint.friendly_name || '')
+      const domain = String(hint.domain || entityId.split('.')[0] || '')
+      const normalizedName = normalizeVoiceText(name)
+      const normalizedEntity = normalizeVoiceText(entityId.split('.').slice(1).join(' ').replace(/_/g, ' '))
+      const exact = normalizedName === normalizedLabel || normalizedEntity === normalizedLabel
+      const contains = normalizedName.includes(normalizedLabel) || normalizedLabel.includes(normalizedName) || normalizedEntity.includes(normalizedLabel)
+      const close = voiceTextSimilarity(normalizedLabel, normalizedName) >= 0.45 || voiceTextSimilarity(normalizedLabel, normalizedEntity) >= 0.45
+      if (!entityId || (!exact && !contains && !close)) return null
+      const domainScore = !allowedDomains.size || allowedDomains.has(domain) ? 20 : 0
+      const exactScore = exact ? 40 : 0
+      const containsScore = contains ? 24 : 0
+      const closeScore = close ? 12 : 0
+      const lengthScore = Math.max(0, 20 - Math.abs(normalizedName.length - normalizedLabel.length))
+      return { entityId, domain, name, confident: exact || (contains && domainScore > 0), score: domainScore + exactScore + containsScore + closeScore + lengthScore }
+    })
+    .filter(Boolean)
+    .sort((first, second) => second.score - first.score || first.entityId.localeCompare(second.entityId))
+  if (!matches.length) return null
+  const suggestions = matches.slice(0, 5).map(({ entityId, domain, name }) => ({ entityId, domain, name }))
+  return { ...matches[0], suggestions }
+}
+
+function getVoiceConditionDomains(state) {
+  if (['locked', 'unlocked'].includes(state)) return ['lock']
+  return ['binary_sensor', 'input_boolean', 'switch', 'sensor', 'cover', 'lock', 'person', 'device_tracker']
+}
+
+function voiceTextSimilarity(firstValue, secondValue) {
+  const firstTokens = normalizeVoiceMatchTokens(firstValue)
+  const secondTokens = normalizeVoiceMatchTokens(secondValue)
+  if (!firstTokens.length || !secondTokens.length) return 0
+  const matchedSecondIndexes = new Set()
+  let score = 0
+  for (const firstToken of firstTokens) {
+    const matchIndex = secondTokens.findIndex((secondToken, index) => !matchedSecondIndexes.has(index) && voiceTokensMatch(firstToken, secondToken))
+    if (matchIndex >= 0) {
+      matchedSecondIndexes.add(matchIndex)
+      score += firstToken === secondTokens[matchIndex] ? 1 : 0.72
+    }
+  }
+  return score / Math.max(firstTokens.length, secondTokens.length)
+}
+
+function normalizeVoiceMatchTokens(value) {
+  const aliases = {
+    bath: 'bathroom',
+    br: 'bedroom',
+    dim: 'dimmer',
+    dr: 'door',
+    kit: 'kitchen',
+    lr: 'living room',
+    rm: 'room',
+    tv: 'television',
+  }
+  return normalizeVoiceText(value)
+    .split(' ')
+    .flatMap((token) => (aliases[token] || token).split(' '))
+    .filter((token) => token.length > 1)
+}
+
+function voiceTokensMatch(firstToken, secondToken) {
+  if (firstToken === secondToken) return true
+  if (firstToken.length >= 3 && secondToken.startsWith(firstToken)) return true
+  if (secondToken.length >= 3 && firstToken.startsWith(secondToken)) return true
+  return false
+}
+
+function buildVoiceRecipeFlow(description, { entityHints = [] } = {}) {
   const text = String(description || '').trim()
   const sections = splitVoiceElseSections(text)
-  const conditions = parseVoiceConditions(sections.primary)
-  const actions = parseVoiceActions(sections.primary)
-  const elseActions = sections.otherwise ? parseVoiceActions(sections.otherwise) : []
+  const conditions = parseVoiceConditions(sections.primary).map((condition) => withResolvedVoiceEntity(condition, entityHints, getVoiceConditionDomains(condition.state)))
+  const actions = parseVoiceActions(sections.primary).map((action) => withResolvedVoiceEntity(action, entityHints, [action.domain]))
+  const elseActions = sections.otherwise ? parseVoiceActions(sections.otherwise).map((action) => withResolvedVoiceEntity(action, entityHints, [action.domain])) : []
   const schedule = parseVoiceSchedule(text)
   const delaySeconds = parseVoiceDelay(sections.primary)
   const waitUntil = parseVoiceWaitUntil(sections.primary)
@@ -2057,7 +2189,9 @@ function buildVoiceRecipeFlow(description) {
       entityId: '',
       from: oppositeVoiceState(triggerCondition.state),
       to: triggerCondition.state,
-      triggers: [{ id: `${prefix}-trigger-rule`, entityId: '', from: oppositeVoiceState(triggerCondition.state), to: triggerCondition.state }],
+      ...(triggerCondition.entityId ? { entityId: triggerCondition.entityId } : {}),
+      ...(triggerCondition.entitySuggestions ? { entitySuggestions: triggerCondition.entitySuggestions } : {}),
+      triggers: [{ id: `${prefix}-trigger-rule`, entityId: triggerCondition.entityId || '', from: oppositeVoiceState(triggerCondition.state), to: triggerCondition.state }],
     })
     x += 300
   }
@@ -2076,7 +2210,9 @@ function buildVoiceRecipeFlow(description) {
       attribute: 'state',
       operator: 'equals',
       value: condition.state,
-      conditions: [{ id: `${prefix}-condition-${nodes.length + 1}`, entityId: '', attribute: 'state', operator: 'equals', value: condition.state }],
+      conditions: [{ id: `${prefix}-condition-${nodes.length + 1}`, entityId: condition.entityId || '', attribute: 'state', operator: 'equals', value: condition.state }],
+      ...(condition.entityId ? { entityId: condition.entityId } : {}),
+      ...(condition.entitySuggestions ? { entitySuggestions: condition.entitySuggestions } : {}),
     })
     if (previousId) connect(previousId, conditionId)
     previousId = conditionId
@@ -2103,8 +2239,9 @@ function buildVoiceRecipeFlow(description) {
     const actionId = addNode('service', `${voiceTitle(action.service)} ${action.label}`, actionX, {
       domain: action.domain,
       service: action.service,
-      entityId: '',
-      entityIds: [],
+      entityId: action.entityId || '',
+      entityIds: action.entityId ? [action.entityId] : [],
+      ...(action.entitySuggestions ? { entitySuggestions: action.entitySuggestions } : {}),
       payload: action.payload,
     })
     if (previousId) connect(previousId, actionId, previousId.includes('condition') ? 'true' : undefined)
@@ -2121,8 +2258,9 @@ function buildVoiceRecipeFlow(description) {
     const actionId = addNode('service', `Otherwise ${voiceTitle(action.service)} ${action.label}`, x + (index * 300), {
       domain: action.domain,
       service: action.service,
-      entityId: '',
-      entityIds: [],
+      entityId: action.entityId || '',
+      entityIds: action.entityId ? [action.entityId] : [],
+      ...(action.entitySuggestions ? { entitySuggestions: action.entitySuggestions } : {}),
       payload: action.payload,
     })
     if (lastConditionId) connect(lastConditionId, actionId, 'false')
@@ -2165,13 +2303,13 @@ function parseVoiceConditions(text) {
     conditions.push({ label, state, stateLabel: voiceStateLabel(stateValue) })
   }
 
-  for (const match of normalized.matchAll(/\b(?:if|when|while|only if|provided|and|or|with)\s+(.+?)\s+(?:is|are|becomes|become|gets|get)\s+(open|closed|on|off|detected|clear|cleared|occupied|unoccupied|home|away|locked|unlocked)\b/g)) {
+  for (const match of normalized.matchAll(/\b(?:if|when|while|only if|provided|and|or|with)\s+(.+?)\s+(?:is|are|becomes|become|gets|get)\s+(open|opened|closed|on|off|detected|clear|cleared|occupied|unoccupied|home|away|locked|unlocked)\b/g)) {
     addCondition(match[1], match[2])
   }
   for (const match of normalized.matchAll(/\b(?:if|when|while|only if|provided|and|or|with)\s+(.+?)\s+(opens|closes|turns on|turns off|detects|clears|locks|unlocks)\b/g)) {
     addCondition(match[1], voiceVerbState(match[2]))
   }
-  for (const match of normalized.matchAll(/\b(?:if|when|while|only if|provided)\s+(.+?)\s+(open|closed|detected|clear|cleared|occupied|unoccupied|locked|unlocked)\b/g)) {
+  for (const match of normalized.matchAll(/\b(?:if|when|while|only if|provided)\s+(.+?)\s+(open|opened|closed|detected|clear|cleared|occupied|unoccupied|locked|unlocked)\b/g)) {
     addCondition(match[1], match[2])
   }
   return conditions
@@ -2261,7 +2399,7 @@ function parseVoiceDelay(text) {
 
 function parseVoiceWaitUntil(text) {
   const normalized = normalizeVoiceNumbers(text)
-  const match = normalized.match(/\bwait\s+until\s+(.+?)\s+(?:is|are|becomes|become|gets|get)\s+(open|closed|on|off|detected|clear|cleared|occupied|unoccupied|home|away|locked|unlocked)\b/)
+  const match = normalized.match(/\bwait\s+until\s+(.+?)\s+(?:is|are|becomes|become|gets|get)\s+(open|opened|closed|on|off|detected|clear|cleared|occupied|unoccupied|home|away|locked|unlocked)\b/)
   if (!match) return null
   const label = voiceTitle(cleanVoiceTarget(match[1]))
   const state = voiceState(match[2])
@@ -2277,6 +2415,7 @@ function voiceState(value) {
   const normalized = normalizeVoiceText(value)
   return {
     open: 'on',
+    opened: 'on',
     closed: 'off',
     detected: 'on',
     clear: 'off',
@@ -2294,7 +2433,7 @@ function voiceState(value) {
 
 function voiceStateLabel(value) {
   const normalized = normalizeVoiceText(value)
-  return { opens: 'open', closes: 'closed', detects: 'detected', clears: 'clear', locks: 'locked', unlocks: 'unlocked', 'turns on': 'on', 'turns off': 'off' }[normalized] || normalized
+  return { opened: 'open', opens: 'open', closes: 'closed', detects: 'detected', clears: 'clear', locks: 'locked', unlocks: 'unlocked', 'turns on': 'on', 'turns off': 'off' }[normalized] || normalized
 }
 
 function voiceVerbState(value) {

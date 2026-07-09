@@ -1195,6 +1195,14 @@ textarea:focus {
   grid-column: 2;
 }
 
+.entity-suggestion-select {
+  padding: 9px 10px;
+  color: #0f766e;
+  background: rgba(20, 184, 166, 0.1);
+  border: 1px solid rgba(20, 184, 166, 0.34);
+  border-radius: 7px;
+}
+
 .shared-attributes {
   display: grid;
   gap: 8px;
@@ -2464,6 +2472,12 @@ textarea:focus {
   color: #d1fae5;
   background: rgba(15, 118, 110, 0.2);
   border-color: #2dd4bf;
+}
+
+.theme-dark .entity-suggestion-select {
+  color: #99f6e4;
+  background: rgba(20, 184, 166, 0.14);
+  border-color: rgba(45, 212, 191, 0.42);
 }
 
 .theme-dark .flow-node.runtime-stopped,

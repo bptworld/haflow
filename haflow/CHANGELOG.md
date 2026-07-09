@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.56
+
+- Let described Recipe and Voice flows use Home Assistant entity hints to prefill generated trigger, condition, and action nodes by entity ID.
+- Show suggested entity dropdowns on generated nodes when Recipe or Voice names are close but not confident enough to auto-select.
+- Match common abbreviated or partial entity wording such as "dr" for "door" and "read lamp" for "reading lamp".
+- Treat "opened" as a synonym for "open" in Recipe and Voice flow descriptions.
+
 ## 0.1.55
 
 - Make the Flow Recipes dialog body scroll so bottom controls stay reachable on shorter screens.

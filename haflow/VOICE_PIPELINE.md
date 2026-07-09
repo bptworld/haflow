@@ -30,7 +30,21 @@ The easiest setup path is **HAFlow > Library > Voice Setup**, which generates th
 }
 ```
 
-The generated flow uses editable HAFlow nodes and leaves entity IDs blank so the flow can be reviewed and finished in the app.
+HAFlow tries to resolve names against Home Assistant entity data. Generated flows are still editable, and unresolved targets stay as placeholders so the flow can be reviewed and finished in the app.
+
+If HAFlow finds close entity matches but cannot confidently choose one, the generated node keeps the entity blank and shows the close matches as a suggested dropdown in the Inspector. Close matching understands common abbreviated or partial wording such as `dr` for `door`, `bath` for `bathroom`, and `read lamp` for `reading lamp`.
+
+When Home Assistant or another caller already knows the exact entities, include entity hints so HAFlow can build nodes by ID:
+
+```json
+{
+  "recipe": "if front door is opened, turn on reading lamp",
+  "entities": [
+    { "name": "front door", "entity_id": "binary_sensor.front_door_contact" },
+    { "name": "reading lamp", "entity_id": "light.reading_lamp" }
+  ]
+}
+```
 
 ## Home Assistant Example
 
