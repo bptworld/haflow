@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.42
+
+- Let Action nodes split `turn_on` and `turn_off` calls by selected entity ID domain, so mixed lights, switches, and helpers can be controlled from one node.
+- Validate mixed on/off Action targets against each selected entity domain.
+
 ## 0.1.41
 
 - Show Pushover priority and sound dropdowns when a Pushover notify service is selected.
