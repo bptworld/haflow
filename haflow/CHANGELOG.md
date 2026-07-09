@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.54
+
+- Add a Voice Setup helper that generates Home Assistant Assist YAML, copies it, opens the health check, and dry-runs the voice recipe API.
+
 ## 0.1.53
 
 - Expose HAFlow port 4177 so Home Assistant voice REST commands can call the web/API endpoint directly.

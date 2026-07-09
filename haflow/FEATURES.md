@@ -58,6 +58,7 @@ HAFlow is a Home Assistant app for building and running flow-based automations.
 
 - Create a blank flow through `POST /api/voice/flow`.
 - Create an editable recipe flow through `POST /api/voice/recipe`.
+- Generate Home Assistant Assist YAML from the Voice Setup helper in the app.
 - Creating recipes is in Beta. Your feedback is welcome!
 - See `VOICE_PIPELINE.md` for Home Assistant custom sentence examples.
 

@@ -333,6 +333,9 @@ app.post('/api/voice/recipe', async (req, res) => {
     const description = String(req.body?.recipe || req.body?.description || req.body?.flow || '').trim()
     if (!description) throw new Error('Missing recipe description.')
     const generated = buildVoiceRecipeFlow(description)
+    if (req.body?.dryRun) {
+      return res.json({ ok: true, summary: generated.summary, speech: 'HAFlow understood the recipe.' })
+    }
     const result = await createGeneratedFlow(generated.flowName, generated)
     log('info', `Voice created recipe flow ${result.flow.name}.`)
     res.json({ ok: true, ...result, summary: generated.summary, speech: `Created HAFlow recipe ${result.flow.name}.` })

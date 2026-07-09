@@ -6,6 +6,8 @@ Creating recipes is in Beta. Your feedback is welcome!
 
 HAFlow exposes port `4177` for voice REST commands. After installing this app version, restart/reinstall HAFlow if Home Assistant has not picked up the new port mapping yet.
 
+The easiest setup path is **HAFlow > Library > Voice Setup**, which generates the YAML below with your HAFlow URL and includes a dry-run API test.
+
 ## Endpoints
 
 ### Create A Blank Flow

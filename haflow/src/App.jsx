@@ -384,6 +384,61 @@ function getInitialRunHistoryCollapsed() {
   return window.localStorage.getItem('haflow-run-history-collapsed') === 'true'
 }
 
+function getDefaultVoiceSetupBaseUrl() {
+  const { protocol, hostname } = window.location
+  const host = hostname || 'homeassistant.local'
+  return `${protocol === 'https:' ? 'https' : 'http'}://${host}:4177`
+}
+
+function buildVoiceSetupYaml(baseUrl) {
+  const url = String(baseUrl || '').trim().replace(/\/+$/, '') || 'http://homeassistant.local:4177'
+  return `rest_command:
+  haflow_create_flow:
+    url: "${url}/api/voice/flow"
+    method: post
+    content_type: "application/json"
+    payload: >
+      {"name":"{{ name }}"}
+
+  haflow_create_recipe:
+    url: "${url}/api/voice/recipe"
+    method: post
+    content_type: "application/json"
+    payload: >
+      {"recipe":"{{ recipe }}"}
+
+conversation:
+  intents:
+    HAFlowCreateFlow:
+      - "make a flow called {name}"
+      - "create a flow called {name}"
+      - "build a flow called {name}"
+
+    HAFlowCreateRecipe:
+      - "make a flow {recipe}"
+      - "create a flow {recipe}"
+      - "build a recipe {recipe}"
+      - "make a recipe {recipe}"
+
+intent_script:
+  HAFlowCreateFlow:
+    action:
+      - action: rest_command.haflow_create_flow
+        data:
+          name: "{{ name }}"
+    speech:
+      text: "Created the HAFlow flow."
+
+  HAFlowCreateRecipe:
+    action:
+      - action: rest_command.haflow_create_recipe
+        data:
+          recipe: "{{ recipe }}"
+    speech:
+      text: "Created the HAFlow recipe flow. Creating recipes is in beta, and your feedback is welcome."
+`
+}
+
 function createId() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID()
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
@@ -2286,11 +2341,14 @@ function FlowWorkspace() {
   const [isRunHistoryCollapsed, setIsRunHistoryCollapsed] = useState(getInitialRunHistoryCollapsed)
   const [isLogModalOpen, setIsLogModalOpen] = useState(false)
   const [isRecipeModalOpen, setIsRecipeModalOpen] = useState(false)
+  const [isVoiceSetupModalOpen, setIsVoiceSetupModalOpen] = useState(false)
   const [selectedRecipeId, setSelectedRecipeId] = useState(FLOW_RECIPES[0]?.id || '')
   const [recipeValues, setRecipeValues] = useState({})
   const [recipeDescription, setRecipeDescription] = useState('')
   const [recipeDescriptionResult, setRecipeDescriptionResult] = useState(null)
   const [recipeVoiceStatus, setRecipeVoiceStatus] = useState('idle')
+  const [voiceSetupBaseUrl, setVoiceSetupBaseUrl] = useState(getDefaultVoiceSetupBaseUrl)
+  const [voiceSetupResult, setVoiceSetupResult] = useState(null)
   const [logQuery, setLogQuery] = useState('')
   const [nodeTestResult, setNodeTestResult] = useState(null)
   const [isFlowMenuOpen, setIsFlowMenuOpen] = useState(false)
@@ -2304,6 +2362,7 @@ function FlowWorkspace() {
   const selectedRecipe = FLOW_RECIPES.find((recipe) => recipe.id === selectedRecipeId) ?? FLOW_RECIPES[0]
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
   const canDictateRecipe = Boolean(SpeechRecognition)
+  const voiceSetupYaml = useMemo(() => buildVoiceSetupYaml(voiceSetupBaseUrl), [voiceSetupBaseUrl])
   const notifyServiceOptions = useMemo(() => {
     const names = services.notify ? Object.keys(services.notify).sort() : []
     return [{ value: '', label: 'Default notification service' }, ...names.map((name) => ({ value: name, label: `notify.${name}` }))]
@@ -3096,6 +3155,31 @@ function FlowWorkspace() {
     setLogs((current) => [{ time: new Date().toISOString(), level: 'info', message: `Added ${result.importedIds?.length ?? 0} Starter flows.` }, ...current])
   }
 
+  const copyVoiceSetupYaml = async () => {
+    try {
+      await navigator.clipboard.writeText(voiceSetupYaml)
+      setVoiceSetupResult({ status: 'pass', title: 'YAML copied', details: ['Paste it into Home Assistant configuration.yaml, then check configuration and restart Home Assistant.'] })
+    } catch (error) {
+      setVoiceSetupResult({ status: 'warn', title: 'Copy failed', details: [error.message] })
+    }
+  }
+
+  const testVoiceSetupApi = async () => {
+    setVoiceSetupResult({ status: 'loading', title: 'Testing voice API', details: ['Calling the HAFlow voice recipe endpoint.'] })
+    try {
+      const response = await apiFetch('/api/voice/recipe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recipe: 'when test trigger is on turn on test light', dryRun: true }),
+      })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.error || 'Voice API test failed.')
+      setVoiceSetupResult({ status: 'pass', title: 'Voice API works', details: result.summary?.length ? result.summary : ['HAFlow understood the test recipe without creating a flow.'] })
+    } catch (error) {
+      setVoiceSetupResult({ status: 'error', title: 'Voice API test failed', details: [error.message] })
+    }
+  }
+
   const saveRecipeFlow = async (baseName, generated, successMessage) => {
     if (!generated.nodes.length) throw new Error('Recipe did not create any nodes.')
     const flowName = getUniqueFlowName(baseName, flows)
@@ -3484,6 +3568,7 @@ function FlowWorkspace() {
             <button onClick={exportBackup} title="Export all flows" type="button"><Download size={16} /> Export Backup</button>
             <button onClick={() => backupImportRef.current?.click()} title="Import all-flow backup" type="button"><Upload size={16} /> Import Backup</button>
             <button onClick={() => setIsRecipeModalOpen(true)} title="Create a flow from a guided recipe" type="button"><FilePlus size={16} /> Recipes</button>
+            <button onClick={() => setIsVoiceSetupModalOpen(true)} title="Set up Home Assistant voice commands" type="button"><Mic size={16} /> Voice Setup</button>
             <button onClick={addStarterPack} title="Add starter flows" type="button"><FilePlus size={16} /> Starter Pack</button>
           </div>
         ) : null}
@@ -3848,6 +3933,49 @@ function FlowWorkspace() {
                 <button onClick={() => setIsRecipeModalOpen(false)} type="button">Cancel</button>
                 <button className="primary-action" onClick={createRecipeFlow} type="button">Create Flow</button>
               </div>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {isVoiceSetupModalOpen ? (
+        <div className="log-modal-backdrop" onMouseDown={() => setIsVoiceSetupModalOpen(false)}>
+          <section className="log-modal voice-setup-modal" onMouseDown={(event) => event.stopPropagation()}>
+            <header>
+              <div>
+                <strong>Voice Setup</strong>
+                <span>Connect Home Assistant Assist or voice satellites to HAFlow.</span>
+              </div>
+              <div className="log-modal-actions">
+                <button onClick={() => setIsVoiceSetupModalOpen(false)} title="Close voice setup" type="button"><X size={18} /></button>
+              </div>
+            </header>
+            <div className="voice-setup-body">
+              <div className="recipe-beta-note">Creating recipes is in Beta. Your feedback is welcome!</div>
+              <label>
+                HAFlow URL
+                <input value={voiceSetupBaseUrl} onChange={(event) => setVoiceSetupBaseUrl(event.target.value)} placeholder="http://homeassistant.local:4177" />
+              </label>
+              <div className="voice-setup-actions">
+                <button onClick={() => window.open(`${voiceSetupBaseUrl.replace(/\/+$/, '')}/health`, '_blank', 'noopener,noreferrer')} type="button">Open Health Check</button>
+                <button onClick={testVoiceSetupApi} type="button">Test Voice API</button>
+                <button className="primary-action" onClick={copyVoiceSetupYaml} type="button">Copy YAML</button>
+              </div>
+              {voiceSetupResult ? (
+                <div className={`node-test-result ${voiceSetupResult.status || 'info'}`}>
+                  <strong>{voiceSetupResult.title}</strong>
+                  {(voiceSetupResult.details ?? []).map((detail, index) => <span key={`${detail}-${index}`}>{detail}</span>)}
+                </div>
+              ) : null}
+              <div className="voice-setup-steps">
+                <div><strong>1</strong><span>Paste the YAML into Home Assistant `configuration.yaml`.</span></div>
+                <div><strong>2</strong><span>Run Check Configuration, then restart Home Assistant.</span></div>
+                <div><strong>3</strong><span>Test Assist with: make a flow when bathroom door closes turn on vanity lights.</span></div>
+              </div>
+              <label>
+                Home Assistant YAML
+                <textarea readOnly spellCheck="false" value={voiceSetupYaml} />
+              </label>
             </div>
           </section>
         </div>

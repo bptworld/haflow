@@ -1793,10 +1793,84 @@ textarea:focus {
   width: min(720px, calc(100vw - 44px));
 }
 
+.voice-setup-modal {
+  width: min(860px, calc(100vw - 44px));
+}
+
 .recipe-modal-body {
   display: grid;
   gap: 14px;
   padding: 14px;
+}
+
+.voice-setup-body {
+  display: grid;
+  gap: 14px;
+  min-height: 0;
+  padding: 14px;
+  overflow-y: auto;
+}
+
+.voice-setup-body textarea {
+  min-height: 360px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre;
+}
+
+.voice-setup-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.voice-setup-actions button {
+  min-height: 38px;
+  padding: 0 12px;
+  color: #17202a;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-weight: 900;
+}
+
+.voice-setup-actions .primary-action {
+  color: #ffffff;
+  background: #0f766e;
+  border-color: #0f766e;
+}
+
+.voice-setup-steps {
+  display: grid;
+  gap: 8px;
+}
+
+.voice-setup-steps div {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: #f8fafc;
+  border: 1px solid #dbe3ef;
+  border-radius: 7px;
+}
+
+.voice-setup-steps strong {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  color: #ffffff;
+  background: #0f766e;
+  border-radius: 999px;
+  font-size: 12px;
+}
+
+.voice-setup-steps span {
+  color: #334155;
+  font-size: 13px;
 }
 
 .recipe-modal-body > p {
@@ -2212,6 +2286,24 @@ textarea:focus {
   color: #e5e7eb;
   background: #1e293b;
   border-color: #334155;
+}
+
+.theme-dark .voice-setup-actions button,
+.theme-dark .voice-setup-steps div {
+  color: #e5e7eb;
+  background: #1e293b;
+  border-color: #334155;
+}
+
+.theme-dark .voice-setup-actions .primary-action,
+.theme-dark .voice-setup-steps strong {
+  color: #042f2e;
+  background: #5eead4;
+  border-color: #5eead4;
+}
+
+.theme-dark .voice-setup-steps span {
+  color: #cbd5e1;
 }
 
 .theme-dark .recipe-description-input button {
