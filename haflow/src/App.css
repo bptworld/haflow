@@ -795,6 +795,21 @@ textarea:focus {
   filter: grayscale(0.35);
 }
 
+.comment-node {
+  min-width: 230px;
+  max-width: 320px;
+  background: #fff7ed;
+  border-color: #fed7aa;
+}
+
+.comment-node p {
+  margin: 0;
+  color: #7c2d12;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
 .group-node {
   width: 100%;
   height: 100%;
@@ -1073,6 +1088,47 @@ textarea:focus {
   padding-top: 16px;
 }
 
+.inspector-test-button {
+  width: 100%;
+  margin: 0 0 12px;
+  justify-content: center;
+}
+
+.node-test-result {
+  display: grid;
+  gap: 5px;
+  margin: -2px 0 12px;
+  padding: 10px;
+  background: #ffffff;
+  border: 1px solid #d8e0e8;
+  border-left: 4px solid #2563eb;
+  border-radius: 7px;
+}
+
+.node-test-result.pass {
+  border-left-color: #0f766e;
+}
+
+.node-test-result.stop,
+.node-test-result.warn {
+  border-left-color: #b45309;
+}
+
+.node-test-result.error {
+  border-left-color: #be123c;
+}
+
+.node-test-result strong {
+  color: #17202a;
+  font-size: 12px;
+}
+
+.node-test-result span {
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
 .toggle-field {
   display: flex;
   grid-template-columns: auto 1fr;
@@ -1159,6 +1215,15 @@ textarea:focus {
 
 .shared-attributes label {
   margin-bottom: 0;
+}
+
+.service-payload-builder {
+  border-left: 4px solid #2563eb;
+}
+
+.service-payload-grid {
+  display: grid;
+  gap: 10px;
 }
 
 .color-value-control {
@@ -1446,6 +1511,26 @@ textarea:focus {
   line-height: 1.2;
 }
 
+.entity-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.entity-filter-grid label {
+  display: grid;
+  gap: 4px;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.entity-filter-grid .entity-area-select {
+  margin-top: 0;
+  min-width: 0;
+}
+
 .entity-list,
 .log-list {
   min-height: 0;
@@ -1704,6 +1789,50 @@ textarea:focus {
   overflow-y: auto;
 }
 
+.recipe-modal {
+  width: min(720px, calc(100vw - 44px));
+}
+
+.recipe-modal-body {
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+}
+
+.recipe-modal-body > p {
+  margin: 0;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.recipe-fields {
+  display: grid;
+  gap: 12px;
+}
+
+.recipe-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.recipe-actions button {
+  min-height: 36px;
+  padding: 0 14px;
+  color: #17202a;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-weight: 900;
+}
+
+.recipe-actions .primary-action {
+  color: #ffffff;
+  background: #0f766e;
+  border-color: #0f766e;
+}
+
 .app-error {
   display: grid;
   min-height: 100vh;
@@ -1826,6 +1955,7 @@ textarea:focus {
 .theme-dark .node-meta,
 .theme-dark .ha-stats,
 .theme-dark .log-line span,
+.theme-dark .recipe-modal-body > p,
 .theme-dark .run-history-item span,
 .theme-dark .run-history-item small,
 .theme-dark .selected-entities p,
@@ -1870,6 +2000,7 @@ textarea:focus {
 .theme-dark .shared-attributes,
 .theme-dark .condition-rule,
 .theme-dark .search-box,
+.theme-dark .node-test-result,
 .theme-dark .entity-list button,
 .theme-dark .entity-empty,
 .theme-dark .log-empty,
@@ -2049,6 +2180,18 @@ textarea:focus {
   border-color: #334155;
 }
 
+.theme-dark .recipe-actions button {
+  color: #e5e7eb;
+  background: #1e293b;
+  border-color: #334155;
+}
+
+.theme-dark .recipe-actions .primary-action {
+  color: #042f2e;
+  background: #5eead4;
+  border-color: #5eead4;
+}
+
 .theme-dark .log-modal-search {
   color: #94a3b8;
   background: #1e293b;
@@ -2057,6 +2200,15 @@ textarea:focus {
 
 .theme-dark .flow-node {
   box-shadow: 0 14px 32px rgba(0, 0, 0, 0.28);
+}
+
+.theme-dark .comment-node {
+  background: #2f2418;
+  border-color: #854d0e;
+}
+
+.theme-dark .comment-node p {
+  color: #fed7aa;
 }
 
 .theme-dark .flow-node.selected .node-header,
@@ -2128,6 +2280,7 @@ textarea:focus {
 
 .theme-dark .node-header,
 .theme-dark .log-line p,
+.theme-dark .node-test-result strong,
 .theme-dark .entity-area-heading {
   color: #f8fafc;
 }
@@ -2153,6 +2306,28 @@ textarea:focus {
 
 .theme-dark .node-disabled {
   background: #334155;
+}
+
+.theme-dark .node-test-result span,
+.theme-dark .entity-filter-grid label {
+  color: #94a3b8;
+}
+
+.theme-dark .node-test-result {
+  border-left-color: #60a5fa;
+}
+
+.theme-dark .node-test-result.pass {
+  border-left-color: #2dd4bf;
+}
+
+.theme-dark .node-test-result.stop,
+.theme-dark .node-test-result.warn {
+  border-left-color: #f59e0b;
+}
+
+.theme-dark .node-test-result.error {
+  border-left-color: #fb7185;
 }
 
 .theme-dark .react-flow__handle {

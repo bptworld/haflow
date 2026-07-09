@@ -411,6 +411,18 @@ app.post('/api/run', async (req, res) => {
   }
 })
 
+app.post('/api/node-preview', async (req, res) => {
+  try {
+    const node = normalizeFlowNode(req.body.node ?? {})
+    const nodes = Array.isArray(req.body.nodes) ? req.body.nodes.map(normalizeFlowNode) : []
+    const edges = Array.isArray(req.body.edges) ? req.body.edges : []
+    const result = await previewNode(node, { nodes, edges })
+    res.json(result)
+  } catch (error) {
+    res.status(400).json({ status: 'error', title: 'Test failed', details: [error.message] })
+  }
+})
+
 app.get('/health', (_, res) => {
   res.json({ ok: true })
 })
@@ -460,7 +472,7 @@ async function runFlow(flow, startNodeId, options = {}) {
 
   const startNodes = startNodeId
     ? [nodesById.get(startNodeId)].filter(Boolean)
-    : nodes.filter((node) => (incoming.get(node.id) ?? 0) === 0)
+    : nodes.filter((node) => node.data?.kind !== 'comment' && (incoming.get(node.id) ?? 0) === 0)
 
   if (!startNodes.length) throw new Error('Pick a start node or add a trigger with no incoming link.')
   log('info', `Running ${startNodes.length} start node${startNodes.length === 1 ? '' : 's'}.`)
@@ -617,8 +629,141 @@ async function executeNode(node, options = {}) {
     return true
   }
 
+  if (data.kind === 'comment') {
+    return false
+  }
+
   log('info', `${data.label || data.kind || 'Node'} triggered.`)
   return true
+}
+
+async function previewNode(node, { nodes = [], edges = [] } = {}) {
+  const data = node.data ?? {}
+  if (data.disabled) return { status: 'warn', title: 'Node is disabled', details: ['This node will stop its branch while it is disabled.'] }
+
+  if (data.kind === 'state') {
+    const rules = getStateTriggerRules(data)
+    if (!rules.length) return { status: 'error', title: 'Trigger needs an entity', details: ['Select an entity before testing this trigger.'] }
+    const details = await Promise.all(rules.map(async (rule) => {
+      const entity = rule.entityId ? await getEntity(rule.entityId).catch(() => null) : null
+      const current = entity?.state ?? 'unavailable'
+      const fromText = hasStateFilter(rule.from) ? ` from ${rule.from}` : ''
+      const toText = hasStateFilter(rule.to) ? ` to ${rule.to}` : ''
+      return `${rule.entityId || rule.deviceName || 'Selected device'} is currently ${current}. This trigger waits for a change${fromText}${toText}.`
+    }))
+    return { status: 'info', title: 'Trigger test', details }
+  }
+
+  if (data.kind === 'event') {
+    const details = [`This node waits for the ${data.eventType || 'selected'} event.`]
+    if (data.entityId) details.push(`It is limited to ${data.entityId}.`)
+    if (hasStateFilter(data.from) || hasStateFilter(data.to)) details.push(`It checks state changes${hasStateFilter(data.from) ? ` from ${data.from}` : ''}${hasStateFilter(data.to) ? ` to ${data.to}` : ''}.`)
+    return { status: 'info', title: 'Event test', details }
+  }
+
+  if (data.kind === 'time') {
+    const now = new Date()
+    const currentMinute = now.getHours() * 60 + now.getMinutes()
+    const match = await getScheduleMatch(node, now, currentMinute)
+    const scheduleText = formatScheduleForLog(data)
+    return match.active
+      ? { status: 'pass', title: 'Schedule is active', details: [`The current time is inside ${scheduleText}.`] }
+      : { status: 'stop', title: 'Schedule is not active', details: [`The current time is outside ${scheduleText}.`] }
+  }
+
+  if (data.kind === 'condition') {
+    const rules = getConditionRules(data)
+    if (!rules.length) return { status: 'error', title: 'Condition needs an entity', details: ['Select at least one entity before testing this condition.'] }
+    const results = await Promise.all(rules.map(async (rule) => {
+      const entity = rule.entityId ? await getEntity(rule.entityId).catch(() => null) : null
+      const actual = getEntityComparableValue(entity, rule.attribute)
+      const expected = String(rule.value ?? '')
+      const passed =
+        rule.operator === 'not_equals' ? actual !== expected :
+        rule.operator === 'contains' ? actual.includes(expected) :
+        actual === expected
+      return { actual, expected, passed, rule }
+    }))
+    const passed = data.conditionMode === 'all' ? results.every((result) => result.passed) : results.some((result) => result.passed)
+    return {
+      status: passed ? 'pass' : 'stop',
+      title: passed ? 'Condition passed' : 'Condition did not pass',
+      details: results.map((result) => `${result.rule.entityId} ${formatPreviewOperator(result.rule.operator)} ${result.expected || 'blank'}; current value is ${result.actual || 'blank'}.`),
+    }
+  }
+
+  if (data.kind === 'and') {
+    const nodesById = new Map(nodes.map((item) => [item.id, item]))
+    const passed = await evaluateAndNode(node, { nodesById, edges })
+    return {
+      status: passed ? 'pass' : 'stop',
+      title: passed ? 'All incoming checks are active' : 'Not all incoming checks are active',
+      details: [`Active states are ${data.activeStates || 'on, active, detected, open, occupied, home'}.`],
+    }
+  }
+
+  if (data.kind === 'direction') {
+    const direction = await resolveDirection(data)
+    return direction
+      ? { status: 'pass', title: 'Direction resolved', details: [`Current movement reads as ${direction}.`, data.targetEntityId ? `A real run would save ${direction} to ${data.targetEntityId}.` : 'Select a helper to save this value during a real run.'] }
+      : { status: 'stop', title: 'Direction could not be resolved', details: ['Both entities must be active or recently changed enough to compare movement.'] }
+  }
+
+  if (data.kind === 'delay') return { status: 'info', title: 'Delay test', details: [`A real run would wait ${Math.max(0, Number(data.seconds ?? 0))} seconds.`] }
+
+  if (data.kind === 'wait') {
+    if (!data.entityId) return { status: 'error', title: 'Wait needs an entity', details: ['Select an entity before testing this wait.'] }
+    const entity = await getEntity(data.entityId).catch(() => null)
+    const actual = getEntityComparableValue(entity, data.attribute)
+    const expected = String(data.to ?? '')
+    const passed = actual === expected
+    return {
+      status: passed ? 'pass' : 'stop',
+      title: passed ? 'Wait condition is already met' : 'Wait condition is not met',
+      details: [`${data.entityId} is currently ${actual || 'blank'}. A real run waits until it is ${expected || 'blank'} or until ${Number(data.timeoutSeconds ?? 300)} seconds pass.`],
+    }
+  }
+
+  if (data.kind === 'service') {
+    const payload = parsePayload(data.payload)
+    const entityIds = data.entityIds ?? []
+    const serviceCalls = buildServiceCalls(data, payload, entityIds)
+    return {
+      status: 'info',
+      title: 'Action test',
+      details: serviceCalls.map((serviceCall) => `A real run would call ${serviceCall.domain}.${serviceCall.service}${formatPreviewTarget(serviceCall.payload.entity_id)}.`),
+    }
+  }
+
+  if (data.kind === 'notify') {
+    const target = normalizeNotifyTarget(data)
+    const message = renderRunMessage(data.message || 'HAFlow notification', {})
+    return { status: 'info', title: 'Notification test', details: [`A real run would send "${message}" through ${target || 'notify.notify'}.`] }
+  }
+
+  if (data.kind === 'scene') {
+    return data.entityId
+      ? { status: 'info', title: 'Scene test', details: [`A real run would turn on ${data.entityId}.`] }
+      : { status: 'error', title: 'Scene needs an entity', details: ['Select a scene before testing this node.'] }
+  }
+
+  if (data.kind === 'debug') return { status: 'info', title: 'Debug test', details: [`A real run would write "${data.message || 'Debug node reached'}" to the run log.`] }
+  if (data.kind === 'or') return { status: 'pass', title: 'OR continues', details: ['This node continues when any incoming path reaches it.'] }
+  if (data.kind === 'end') return { status: 'stop', title: 'Branch ends here', details: ['A real run would stop this branch at this node.'] }
+  if (data.kind === 'comment') return { status: 'info', title: 'Comment only', details: ['This note does not change how the flow runs.'] }
+
+  return { status: 'info', title: 'Node test', details: ['This node has no special test behavior.'] }
+}
+
+function formatPreviewOperator(operator) {
+  if (operator === 'not_equals') return 'is not'
+  if (operator === 'contains') return 'contains'
+  return 'is'
+}
+
+function formatPreviewTarget(entityId) {
+  if (!entityId) return ''
+  return Array.isArray(entityId) ? ` for ${entityId.join(', ')}` : ` for ${entityId}`
 }
 
 function buildServiceCalls(data, basePayload, entityIds) {
@@ -2103,6 +2248,14 @@ function normalizeNodeData(data, nodeId) {
       dataJson: data.dataJson ?? '{}',
       pushoverPriority: data.pushoverPriority ?? '',
       pushoverSound: data.pushoverSound ?? '',
+    }
+  }
+
+  if (data.kind === 'comment') {
+    return {
+      ...data,
+      label: String(data.label || 'Comment'),
+      text: String(data.text || ''),
     }
   }
 

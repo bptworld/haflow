@@ -28,6 +28,8 @@ HAFlow is a Home Assistant app for building and running flow-based automations.
 - View a canvas device status panel for entities and devices used by the current flow.
 - See live node runtime status, including running, completed, and stopped states.
 - See the latest trigger time in the toolbar.
+- Test the selected node and preview what it would do without running the full flow.
+- Add Comment nodes for readable canvas notes that do not change how flows run.
 
 ## Flow Library
 
@@ -41,6 +43,7 @@ HAFlow is a Home Assistant app for building and running flow-based automations.
 - Import and export a single flow.
 - Export and import whole-library backups.
 - Import starter flow packs.
+- Create new editable flows from guided recipes using real Home Assistant entities.
 - Watch all saved, unpaused flows with the automatic runner, not only the currently open flow.
 
 ## Runner
@@ -69,6 +72,7 @@ HAFlow is a Home Assistant app for building and running flow-based automations.
 - `AND`: continues only when all incoming triggers or conditions are currently active.
 - `Direction`: compares two active entities and writes movement direction to a helper.
 - `Group`: frames nodes as a movable, copyable, deletable subflow.
+- `Comment`: adds readable notes to the canvas without changing how the flow runs.
 - `Delay`: pauses for a fixed time.
 - `Wait`: pauses until an entity reaches a state or timeout.
 - `End`: intentionally stops a branch.
@@ -81,6 +85,7 @@ HAFlow is a Home Assistant app for building and running flow-based automations.
 
 - Select one or more target entities.
 - Choose a Home Assistant service domain and service.
+- Build common service payloads with readable controls and prefilled dropdowns.
 - Configure JSON payloads.
 - Show shared attributes for selected entities.
 - Validate missing services, missing targets, bad JSON, and stale entities.
@@ -124,6 +129,7 @@ HAFlow is a Home Assistant app for building and running flow-based automations.
 ## Device And Entity Support
 
 - Build an entity catalog from Home Assistant.
+- Filter the entity picker by area, type, current state, and whether an entity is already used in the current flow.
 - Use area, device, and entity registry discovery.
 - Include device-only entries for devices without state entities.
 - Show live status for entities used by the current flow.
@@ -151,3 +157,4 @@ HAFlow is a Home Assistant app for building and running flow-based automations.
 - `5-button-pico-example.json`
 - `2-button-pico-example.json`
 - Starter Pack import support.
+- Flow Recipes for motion light timeout, door-left-open notification, and scheduled scene flows.

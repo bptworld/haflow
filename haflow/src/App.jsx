@@ -115,6 +115,51 @@ const WEEKDAY_OPTIONS = [
   { value: 6, label: 'Sat' },
 ]
 const SCHEDULE_TIME_TYPES = ['time', 'sunrise', 'sunset']
+const RECIPE_WAIT_OPTIONS = [
+  { value: '60', label: '1 minute' },
+  { value: '120', label: '2 minutes' },
+  { value: '300', label: '5 minutes' },
+  { value: '600', label: '10 minutes' },
+  { value: '900', label: '15 minutes' },
+  { value: '1800', label: '30 minutes' },
+]
+const FLOW_RECIPES = [
+  {
+    id: 'motion-light-timeout',
+    name: 'Motion Light With Timeout',
+    description: 'Turn on a light or switch when motion is detected, wait, then turn it off only if motion is clear.',
+    fields: [
+      { id: 'motionSensor', label: 'Motion Sensor', type: 'entity', domains: ['binary_sensor'] },
+      { id: 'targetEntity', label: 'Light, Switch, Fan, Or Helper', type: 'entity', domains: ['light', 'switch', 'fan', 'input_boolean'] },
+      { id: 'waitSeconds', label: 'Wait Before Turning Off', type: 'choice', options: RECIPE_WAIT_OPTIONS, defaultValue: '120' },
+    ],
+  },
+  {
+    id: 'door-left-open',
+    name: 'Door Left Open Notification',
+    description: 'Wait after a door opens, check that it is still open, then send a notification.',
+    fields: [
+      { id: 'doorSensor', label: 'Door Sensor', type: 'entity', domains: ['binary_sensor'] },
+      { id: 'waitSeconds', label: 'How Long The Door Can Stay Open', type: 'choice', options: RECIPE_WAIT_OPTIONS, defaultValue: '300' },
+      { id: 'notifyService', label: 'Notification Service', type: 'notifyService' },
+    ],
+  },
+  {
+    id: 'schedule-scene',
+    name: 'Scheduled Scene',
+    description: 'Turn on a Home Assistant scene at a selected time every day.',
+    fields: [
+      { id: 'sceneEntity', label: 'Scene', type: 'entity', domains: ['scene'] },
+      { id: 'timeOfDay', label: 'Time Of Day', type: 'choice', options: [
+        { value: '06:00', label: '6:00 AM' },
+        { value: '07:00', label: '7:00 AM' },
+        { value: '18:00', label: '6:00 PM' },
+        { value: '19:00', label: '7:00 PM' },
+        { value: '22:00', label: '10:00 PM' },
+      ], defaultValue: '19:00' },
+    ],
+  },
+]
 const BINARY_SENSOR_STATE_LABELS = {
   battery: { on: 'Low', off: 'Normal' },
   battery_charging: { on: 'Charging', off: 'Not Charging' },
@@ -218,6 +263,14 @@ const nodeCatalog = [
     icon: ListTree,
     color: '#64748b',
     data: { label: 'Subflow' },
+  },
+  {
+    type: 'comment',
+    label: 'Comment',
+    description: 'Adds readable notes to the canvas without changing how the flow runs.',
+    icon: Pencil,
+    color: '#64748b',
+    data: { label: 'Comment', text: 'Add a note about this flow.' },
   },
   {
     type: 'delay',
@@ -394,7 +447,7 @@ function NodeBody({ data, selected }) {
   const runtimeStatus = data.runtimeStatus
   const disabled = data.disabled
   const summaryLines = summarizeNode(data)
-  const showTargetHandle = !['state', 'event'].includes(data.kind)
+  const showTargetHandle = !['state', 'event', 'comment'].includes(data.kind)
 
   if (data.kind === 'group') {
     return (
@@ -404,6 +457,19 @@ function NodeBody({ data, selected }) {
           <span>{data.label || catalogItem.label}</span>
         </div>
         {data.groupDeviceName ? <div className="group-node-device"><strong>{data.groupDeviceName}</strong></div> : null}
+      </div>
+    )
+  }
+
+  if (data.kind === 'comment') {
+    return (
+      <div className={`flow-node comment-node ${selected ? 'selected' : ''} ${disabled ? 'disabled' : ''}`} style={{ '--node-color': catalogItem.color }} tabIndex={0}>
+        <div className="node-header">
+          <span className="node-icon"><Icon size={16} /></span>
+          <span>{data.label || 'Comment'}</span>
+        </div>
+        <p>{data.text || 'Add a note about this flow.'}</p>
+        {disabled && <div className="node-disabled"><Ban size={13} /> Disabled</div>}
       </div>
     )
   }
@@ -483,6 +549,7 @@ function summarizeNode(data) {
   if (data.kind === 'notify') return data.notifyService ? `Notify notify.${data.notifyService}` : data.target ? `Notify ${data.target}` : data.message || 'Notification'
   if (data.kind === 'scene') return data.entityId ? `Turn on ${entityName}` : 'Choose a scene'
   if (data.kind === 'group') return 'Same-screen subflow'
+  if (data.kind === 'comment') return data.text || 'Add a note about this flow.'
   return data.message || 'Debug output'
 }
 
@@ -1048,6 +1115,97 @@ function isSelectableEntity(entity) {
   return entity?.catalogType !== 'device' && String(entity?.entity_id || '').includes('.')
 }
 
+function recipeEntityMatchesField(entity, field) {
+  if (!isSelectableEntity(entity)) return false
+  if (!field.domains?.length) return true
+  return field.domains.includes(entity.domain || String(entity.entity_id).split('.')[0])
+}
+
+function getRecipeEntityOptions(entities, field) {
+  return entities
+    .filter((entity) => recipeEntityMatchesField(entity, field))
+    .sort((first, second) => (
+      (first.areaName || 'Unassigned').localeCompare(second.areaName || 'Unassigned') ||
+      (first.friendlyName || first.entity_id).localeCompare(second.friendlyName || second.entity_id)
+    ))
+}
+
+function getRecipeEntityLabel(entities, entityId) {
+  const entity = entities.find((item) => item.entity_id === entityId)
+  return entity?.friendlyName || entityId
+}
+
+function buildRecipeFlow(recipe, values, entities) {
+  const label = (entityId) => getRecipeEntityLabel(entities, entityId)
+  const id = (name) => `${recipe.id}-${name}-${createId().slice(0, 8)}`
+
+  if (recipe.id === 'motion-light-timeout') {
+    const motionSensor = values.motionSensor
+    const targetEntity = values.targetEntity
+    const waitSeconds = Number(values.waitSeconds || 120)
+    const targetDomain = String(targetEntity).split('.')[0] || 'homeassistant'
+    const triggerId = id('motion-detected')
+    const onId = id('turn-on')
+    const delayId = id('wait')
+    const clearId = id('motion-clear')
+    const offId = id('turn-off')
+    return {
+      nodes: [
+        { id: triggerId, type: 'haflow', position: { x: 80, y: 120 }, data: { kind: 'state', label: `${label(motionSensor)} Detected`, entityId: motionSensor, from: 'off', to: 'on', triggers: [{ id: `${triggerId}-rule`, entityId: motionSensor, from: 'off', to: 'on' }] } },
+        { id: onId, type: 'haflow', position: { x: 380, y: 120 }, data: { kind: 'service', label: `Turn On ${label(targetEntity)}`, domain: targetDomain, service: 'turn_on', entityId: targetEntity, entityIds: [targetEntity], payload: '{}' } },
+        { id: delayId, type: 'haflow', position: { x: 680, y: 120 }, data: { kind: 'delay', label: `Wait ${formatDuration(waitSeconds * 1000)}`, seconds: waitSeconds } },
+        { id: clearId, type: 'haflow', position: { x: 980, y: 120 }, data: { kind: 'condition', label: `${label(motionSensor)} Clear`, conditionMode: 'all', entityId: motionSensor, attribute: 'state', operator: 'equals', value: 'off', conditions: [{ id: `${clearId}-condition`, entityId: motionSensor, attribute: 'state', operator: 'equals', value: 'off' }] } },
+        { id: offId, type: 'haflow', position: { x: 1280, y: 120 }, data: { kind: 'service', label: `Turn Off ${label(targetEntity)}`, domain: targetDomain, service: 'turn_off', entityId: targetEntity, entityIds: [targetEntity], payload: '{}' } },
+      ],
+      edges: [
+        { id: `${triggerId}-${onId}`, source: triggerId, target: onId, animated: true },
+        { id: `${onId}-${delayId}`, source: onId, target: delayId, animated: true },
+        { id: `${delayId}-${clearId}`, source: delayId, target: clearId, animated: true },
+        { id: `${clearId}-${offId}`, source: clearId, sourceHandle: 'true', target: offId, animated: true },
+      ],
+    }
+  }
+
+  if (recipe.id === 'door-left-open') {
+    const doorSensor = values.doorSensor
+    const waitSeconds = Number(values.waitSeconds || 300)
+    const notifyService = values.notifyService || ''
+    const triggerId = id('door-opened')
+    const delayId = id('wait')
+    const openId = id('door-still-open')
+    const notifyId = id('notify')
+    return {
+      nodes: [
+        { id: triggerId, type: 'haflow', position: { x: 80, y: 120 }, data: { kind: 'state', label: `${label(doorSensor)} Opened`, entityId: doorSensor, from: 'off', to: 'on', triggers: [{ id: `${triggerId}-rule`, entityId: doorSensor, from: 'off', to: 'on' }] } },
+        { id: delayId, type: 'haflow', position: { x: 380, y: 120 }, data: { kind: 'delay', label: `Wait ${formatDuration(waitSeconds * 1000)}`, seconds: waitSeconds } },
+        { id: openId, type: 'haflow', position: { x: 680, y: 120 }, data: { kind: 'condition', label: `${label(doorSensor)} Still Open`, conditionMode: 'all', entityId: doorSensor, attribute: 'state', operator: 'equals', value: 'on', conditions: [{ id: `${openId}-condition`, entityId: doorSensor, attribute: 'state', operator: 'equals', value: 'on' }] } },
+        { id: notifyId, type: 'haflow', position: { x: 980, y: 120 }, data: { kind: 'notify', label: 'Send Door Notification', notifyService, target: notifyService, title: 'Door left open', message: `${label(doorSensor)} has been open for ${formatDuration(waitSeconds * 1000)}.`, dataJson: '{}', pushoverPriority: '', pushoverSound: '' } },
+      ],
+      edges: [
+        { id: `${triggerId}-${delayId}`, source: triggerId, target: delayId, animated: true },
+        { id: `${delayId}-${openId}`, source: delayId, target: openId, animated: true },
+        { id: `${openId}-${notifyId}`, source: openId, sourceHandle: 'true', target: notifyId, animated: true },
+      ],
+    }
+  }
+
+  if (recipe.id === 'schedule-scene') {
+    const sceneEntity = values.sceneEntity
+    const timeOfDay = values.timeOfDay || '19:00'
+    const scheduleId = id('schedule')
+    const sceneId = id('scene')
+    return {
+      nodes: [
+        { id: scheduleId, type: 'haflow', position: { x: 80, y: 120 }, data: { kind: 'time', label: `Every Day At ${timeOfDay}`, scheduleMode: 'at', atType: 'time', at: timeOfDay, days: [] } },
+        { id: sceneId, type: 'haflow', position: { x: 380, y: 120 }, data: { kind: 'scene', label: `Turn On ${label(sceneEntity)}`, entityId: sceneEntity } },
+      ],
+      edges: [{ id: `${scheduleId}-${sceneId}`, source: scheduleId, target: sceneId, animated: true }],
+    }
+  }
+
+  return { nodes: [], edges: [] }
+}
+
 function isDeviceCatalogItem(entity) {
   return entity?.catalogType === 'device' && entity.deviceId
 }
@@ -1169,6 +1327,9 @@ function FlowWorkspace() {
   const [saveStatus, setSaveStatus] = useState('loading')
   const [historyState, setHistoryState] = useState({ canUndo: false, canRedo: false })
   const [selectedAreaName, setSelectedAreaName] = useState('')
+  const [selectedEntityType, setSelectedEntityType] = useState('')
+  const [selectedEntityState, setSelectedEntityState] = useState('')
+  const [selectedEntityUsage, setSelectedEntityUsage] = useState('all')
   const [viewport, setViewport] = useState(defaultViewport)
   const [showLastRunSnapshot, setShowLastRunSnapshot] = useState(false)
   const [theme, setTheme] = useState(getInitialTheme)
@@ -1176,7 +1337,11 @@ function FlowWorkspace() {
   const [isLibraryCollapsed, setIsLibraryCollapsed] = useState(getInitialLibraryCollapsed)
   const [isRunHistoryCollapsed, setIsRunHistoryCollapsed] = useState(getInitialRunHistoryCollapsed)
   const [isLogModalOpen, setIsLogModalOpen] = useState(false)
+  const [isRecipeModalOpen, setIsRecipeModalOpen] = useState(false)
+  const [selectedRecipeId, setSelectedRecipeId] = useState(FLOW_RECIPES[0]?.id || '')
+  const [recipeValues, setRecipeValues] = useState({})
   const [logQuery, setLogQuery] = useState('')
+  const [nodeTestResult, setNodeTestResult] = useState(null)
   const [isFlowMenuOpen, setIsFlowMenuOpen] = useState(false)
   const isDarkTheme = theme === 'dark'
   const { screenToFlowPosition, setViewport: setReactFlowViewport, getViewport } = useReactFlow()
@@ -1185,6 +1350,11 @@ function FlowWorkspace() {
   const selectedNodeIdSet = useMemo(() => new Set(selectedNodeIds), [selectedNodeIds])
   const hasNodeSelection = selectedNodeIds.length > 0
   const activeFlow = flows.find((flow) => flow.id === activeFlowId)
+  const selectedRecipe = FLOW_RECIPES.find((recipe) => recipe.id === selectedRecipeId) ?? FLOW_RECIPES[0]
+  const notifyServiceOptions = useMemo(() => {
+    const names = services.notify ? Object.keys(services.notify).sort() : []
+    return [{ value: '', label: 'Default notification service' }, ...names.map((name) => ({ value: name, label: `notify.${name}` }))]
+  }, [services])
   const sortedFlows = useMemo(() => [...flows].sort((first, second) => first.name.localeCompare(second.name)), [flows])
   const entityById = useMemo(() => new Map(entities.map((entity) => [entity.entity_id, entity])), [entities])
   const filteredLogs = useMemo(() => {
@@ -1247,10 +1417,27 @@ function FlowWorkspace() {
   }), [edges, isInLastRunSnapshot, nodeRuntime, runtimeClock])
   const validationIssues = useMemo(() => validateFlow(nodes, edges, entityById, services, activeFlow?.paused), [activeFlow?.paused, edges, entityById, nodes, services])
   const flowSnapshot = useMemo(() => JSON.stringify({ nodes, edges }), [edges, nodes])
+  const flowEntityIdSet = useMemo(() => new Set(collectFlowEntityIds(nodes)), [nodes])
+  const entityTypeOptions = useMemo(() => {
+    return Array.from(new Set(entities.map((entity) => entity.deviceType || entity.entity_id?.split('.')[0]).filter(Boolean))).sort((first, second) => first.localeCompare(second))
+  }, [entities])
+  const entityStateOptions = useMemo(() => {
+    return Array.from(new Set(entities
+      .filter((entity) => isSelectableEntity(entity))
+      .map((entity) => entity.state)
+      .filter(Boolean)))
+      .sort((first, second) => formatStateOption(first).localeCompare(formatStateOption(second)))
+  }, [entities])
   const groupedEntities = useMemo(() => {
     const normalized = query.trim().toLowerCase()
     const filtered = entities
       .filter((entity) => {
+        const type = entity.deviceType || entity.entity_id?.split('.')[0] || ''
+        const isUsedInFlow = flowEntityIdSet.has(entity.entity_id) || (entity.deviceId && flowEntityIdSet.has(`device.${entity.deviceId}`))
+        if (selectedEntityType && type !== selectedEntityType) return false
+        if (selectedEntityState && entity.state !== selectedEntityState) return false
+        if (selectedEntityUsage === 'used' && !isUsedInFlow) return false
+        if (selectedEntityUsage === 'unused' && isUsedInFlow) return false
         if (!normalized) return true
         return [
           entity.entity_id,
@@ -1284,7 +1471,7 @@ function FlowWorkspace() {
     }
 
     return groups.sort((first, second) => first.areaName.localeCompare(second.areaName))
-  }, [entities, query])
+  }, [entities, flowEntityIdSet, query, selectedEntityState, selectedEntityType, selectedEntityUsage])
   const entityAreaNames = useMemo(() => groupedEntities.map((group) => group.areaName), [groupedEntities])
   const isEntitySearchActive = Boolean(query.trim())
   const visibleEntityArea = useMemo(() => {
@@ -1413,6 +1600,27 @@ function FlowWorkspace() {
   useEffect(() => {
     if (!hasLastRunSnapshot) setShowLastRunSnapshot(false)
   }, [hasLastRunSnapshot])
+
+  useEffect(() => {
+    if (!selectedRecipe) return
+    setRecipeValues((current) => {
+      const next = { ...current }
+      for (const field of selectedRecipe.fields) {
+        if (next[field.id]) continue
+        if (field.type === 'choice') next[field.id] = field.defaultValue || field.options?.[0]?.value || ''
+        if (field.type === 'notifyService') next[field.id] = notifyServiceOptions[0]?.value ?? ''
+        if (field.type === 'entity') {
+          const match = entities.find((entity) => recipeEntityMatchesField(entity, field))
+          next[field.id] = match?.entity_id || ''
+        }
+      }
+      return next
+    })
+  }, [entities, notifyServiceOptions, selectedRecipe])
+
+  useEffect(() => {
+    setNodeTestResult(null)
+  }, [selectedId])
 
   useEffect(() => {
     const socket = new WebSocket(getWebSocketUrl())
@@ -1935,6 +2143,43 @@ function FlowWorkspace() {
     setLogs((current) => [{ time: new Date().toISOString(), level: 'info', message: `Added ${result.importedIds?.length ?? 0} Starter flows.` }, ...current])
   }
 
+  const createRecipeFlow = async () => {
+    if (!selectedRecipe) return
+    const missingField = selectedRecipe.fields.find((field) => !recipeValues[field.id])
+    if (missingField) {
+      setLogs((current) => [{ time: new Date().toISOString(), level: 'warn', message: `Choose ${missingField.label} before creating this recipe.` }, ...current])
+      return
+    }
+
+    try {
+      const generated = buildRecipeFlow(selectedRecipe, recipeValues, entities)
+      if (!generated.nodes.length) throw new Error('Recipe did not create any nodes.')
+      const flowName = getUniqueFlowName(selectedRecipe.name, flows)
+      const createResponse = await apiFetch('/api/flows', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: flowName }),
+      })
+      const createResult = await createResponse.json()
+      if (!createResponse.ok) throw new Error(createResult.error || 'Recipe flow could not be created.')
+      const flowId = createResult.flow.id
+      const viewport = { x: 0, y: 0, zoom: 0.85 }
+      const saveResponse = await apiFetch(`/api/flows/${flowId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...generated, viewport }),
+      })
+      const saveResult = await saveResponse.json()
+      if (!saveResponse.ok) throw new Error(saveResult.error || 'Recipe flow could not be saved.')
+      setFlows(createResult.flows ?? [])
+      setIsRecipeModalOpen(false)
+      await loadFlow(flowId)
+      setLogs((current) => [{ time: new Date().toISOString(), level: 'info', message: `Created ${flowName} from the ${selectedRecipe.name} recipe.` }, ...current])
+    } catch (error) {
+      setLogs((current) => [{ time: new Date().toISOString(), level: 'error', message: error.message }, ...current])
+    }
+  }
+
   const importFlow = async (event) => {
     const file = event.target.files?.[0]
     event.target.value = ''
@@ -1989,6 +2234,23 @@ function FlowWorkspace() {
     })
     const result = await response.json()
     setLogs((current) => [{ time: new Date().toISOString(), level: result.ok ? 'info' : 'error', message: result.message }, ...current])
+  }
+
+  const testSelectedNode = async () => {
+    if (!selectedNode) return
+    setNodeTestResult({ status: 'loading', title: 'Testing node', details: ['Checking current Home Assistant state.'] })
+    try {
+      const response = await apiFetch('/api/node-preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ node: selectedNode, nodes, edges }),
+      })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.error || 'Node test failed.')
+      setNodeTestResult(result)
+    } catch (error) {
+      setNodeTestResult({ status: 'error', title: 'Test failed', details: [error.message] })
+    }
   }
 
   saveFlowRef.current = saveFlow
@@ -2209,6 +2471,7 @@ function FlowWorkspace() {
             <button onClick={() => importRef.current?.click()} title="Import flow into current canvas" type="button"><Upload size={16} /> Import Flow</button>
             <button onClick={exportBackup} title="Export all flows" type="button"><Download size={16} /> Export Backup</button>
             <button onClick={() => backupImportRef.current?.click()} title="Import all-flow backup" type="button"><Upload size={16} /> Import Backup</button>
+            <button onClick={() => setIsRecipeModalOpen(true)} title="Create a flow from a guided recipe" type="button"><FilePlus size={16} /> Recipes</button>
             <button onClick={addStarterPack} title="Add starter flows" type="button"><FilePlus size={16} /> Starter Pack</button>
           </div>
         ) : null}
@@ -2399,7 +2662,7 @@ function FlowWorkspace() {
         </div>
         <div className="inspector-scroll">
           {selectedNode ? (
-            <Inspector entities={entities} node={selectedNode} services={services} updateNodeData={updateNodeData} />
+            <Inspector entities={entities} node={selectedNode} nodeTestResult={nodeTestResult} onTestNode={testSelectedNode} services={services} updateNodeData={updateNodeData} />
           ) : (
             <div className="empty-state">
               <Split size={30} />
@@ -2433,14 +2696,41 @@ function FlowWorkspace() {
           <div className="section-title">Entities</div>
           <div className="search-box">
             <Search size={15} />
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Filter entity ids" />
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search entities" />
           </div>
-          <select className="entity-area-select" value={isEntitySearchActive && selectedAreaName === ALL_ENTITY_AREAS ? ALL_ENTITY_AREAS : (visibleEntityArea?.areaName ?? '')} onChange={(event) => setSelectedAreaName(event.target.value)}>
-            {isEntitySearchActive ? <option value={ALL_ENTITY_AREAS}>All matching areas</option> : null}
-            {groupedEntities.map((areaGroup) => (
-              <option key={areaGroup.areaName} value={areaGroup.areaName}>{areaGroup.areaName}</option>
-            ))}
-          </select>
+          <div className="entity-filter-grid">
+            <label>
+              Area
+              <select className="entity-area-select" value={isEntitySearchActive && selectedAreaName === ALL_ENTITY_AREAS ? ALL_ENTITY_AREAS : (visibleEntityArea?.areaName ?? '')} onChange={(event) => setSelectedAreaName(event.target.value)}>
+                {isEntitySearchActive ? <option value={ALL_ENTITY_AREAS}>All matching areas</option> : null}
+                {groupedEntities.map((areaGroup) => (
+                  <option key={areaGroup.areaName} value={areaGroup.areaName}>{areaGroup.areaName}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Type
+              <select className="entity-area-select" value={selectedEntityType} onChange={(event) => setSelectedEntityType(event.target.value)}>
+                <option value="">All types</option>
+                {entityTypeOptions.map((type) => <option key={type} value={type}>{formatDomainName(type)}</option>)}
+              </select>
+            </label>
+            <label>
+              State
+              <select className="entity-area-select" value={selectedEntityState} onChange={(event) => setSelectedEntityState(event.target.value)}>
+                <option value="">All states</option>
+                {entityStateOptions.map((state) => <option key={state} value={state}>{formatStateOption(state)}</option>)}
+              </select>
+            </label>
+            <label>
+              Use in Flow
+              <select className="entity-area-select" value={selectedEntityUsage} onChange={(event) => setSelectedEntityUsage(event.target.value)}>
+                <option value="all">All entities</option>
+                <option value="used">Only used in this flow</option>
+                <option value="unused">Only unused entities</option>
+              </select>
+            </label>
+          </div>
           <div className="entity-list">
             {visibleEntityAreas.length ? (
               visibleEntityAreas.map((areaGroup) => (
@@ -2466,6 +2756,50 @@ function FlowWorkspace() {
           </div>
         </div>
       </aside>
+
+      {isRecipeModalOpen ? (
+        <div className="log-modal-backdrop" onMouseDown={() => setIsRecipeModalOpen(false)}>
+          <section className="log-modal recipe-modal" onMouseDown={(event) => event.stopPropagation()}>
+            <header>
+              <div>
+                <strong>Flow Recipes</strong>
+                <span>Create a new editable flow from real Home Assistant entities.</span>
+              </div>
+              <div className="log-modal-actions">
+                <button onClick={() => setIsRecipeModalOpen(false)} title="Close recipes" type="button"><X size={18} /></button>
+              </div>
+            </header>
+            <div className="recipe-modal-body">
+              <label>
+                Recipe
+                <select value={selectedRecipe?.id || ''} onChange={(event) => {
+                  setSelectedRecipeId(event.target.value)
+                  setRecipeValues({})
+                }}>
+                  {FLOW_RECIPES.map((recipe) => <option key={recipe.id} value={recipe.id}>{recipe.name}</option>)}
+                </select>
+              </label>
+              <p>{selectedRecipe?.description}</p>
+              <div className="recipe-fields">
+                {selectedRecipe?.fields.map((field) => (
+                  <RecipeField
+                    entities={entities}
+                    field={field}
+                    key={field.id}
+                    notifyServiceOptions={notifyServiceOptions}
+                    onChange={(value) => setRecipeValues((current) => ({ ...current, [field.id]: value }))}
+                    value={recipeValues[field.id] || ''}
+                  />
+                ))}
+              </div>
+              <div className="recipe-actions">
+                <button onClick={() => setIsRecipeModalOpen(false)} type="button">Cancel</button>
+                <button className="primary-action" onClick={createRecipeFlow} type="button">Create Flow</button>
+              </div>
+            </div>
+          </section>
+        </div>
+      ) : null}
 
       {isLogModalOpen ? (
         <div className="log-modal-backdrop" onMouseDown={() => setIsLogModalOpen(false)}>
@@ -2510,6 +2844,45 @@ function EntityInput({ entities, placeholder, value, onChange }) {
         </option>
       ))}
     </select>
+  )
+}
+
+function RecipeField({ entities, field, notifyServiceOptions, onChange, value }) {
+  if (field.type === 'entity') {
+    const options = getRecipeEntityOptions(entities, field)
+    return (
+      <label>
+        {field.label}
+        <select onChange={(event) => onChange(event.target.value)} value={value}>
+          <option value="">Choose {field.label}</option>
+          {options.map((entity) => (
+            <option key={entity.entity_id} value={entity.entity_id}>
+              {entity.areaName || 'Unassigned'} / {entity.deviceType || formatDomainName(entity.domain)} / {entity.friendlyName || entity.entity_id}
+            </option>
+          ))}
+        </select>
+      </label>
+    )
+  }
+
+  if (field.type === 'notifyService') {
+    return (
+      <label>
+        {field.label}
+        <select onChange={(event) => onChange(event.target.value)} value={value}>
+          {notifyServiceOptions.map((option) => <option key={option.value || 'default'} value={option.value}>{option.label}</option>)}
+        </select>
+      </label>
+    )
+  }
+
+  return (
+    <label>
+      {field.label}
+      <select onChange={(event) => onChange(event.target.value)} value={value}>
+        {(field.options ?? []).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+      </select>
+    </label>
   )
 }
 
@@ -2583,7 +2956,7 @@ function SchedulePointEditor({ data, field, label, updateNodeData }) {
   )
 }
 
-function Inspector({ entities, node, services, updateNodeData }) {
+function Inspector({ entities, node, nodeTestResult, onTestNode, services, updateNodeData }) {
   const data = node.data
   const selectedEntity = entities.find((entity) => entity.entity_id === data.entityId)
   const [stateOptions, setStateOptions] = useState([])
@@ -2665,6 +3038,16 @@ function Inspector({ entities, node, services, updateNodeData }) {
         Label
         <input value={data.label ?? ''} onChange={(event) => updateNodeData({ label: event.target.value })} />
       </label>
+      <button className="secondary-action inspector-test-button" disabled={nodeTestResult?.status === 'loading'} onClick={onTestNode} type="button">
+        <SquarePlay size={16} />
+        {nodeTestResult?.status === 'loading' ? 'Testing Selected Node' : 'Test Selected Node'}
+      </button>
+      {nodeTestResult ? (
+        <div className={`node-test-result ${nodeTestResult.status || 'info'}`}>
+          <strong>{nodeTestResult.title || 'Node test result'}</strong>
+          {(nodeTestResult.details ?? []).map((detail, index) => <span key={`${detail}-${index}`}>{detail}</span>)}
+        </div>
+      ) : null}
       {['scene', 'service', 'wait'].includes(data.kind) && (
         <>
           <label>
@@ -2831,6 +3214,12 @@ function Inspector({ entities, node, services, updateNodeData }) {
               </select>
             </label>
           </div>
+          <ServicePayloadBuilder
+            entities={selectedActionEntities}
+            payload={data.payload}
+            service={data.service}
+            updateNodeData={updateNodeData}
+          />
           <SharedAttributes attributes={sharedAttributes} payload={data.payload} updateNodeData={updateNodeData} />
           <label>JSON payload<textarea value={data.payload ?? '{}'} onChange={(event) => updateNodeData({ payload: event.target.value })} spellCheck="false" /></label>
         </>
@@ -2880,6 +3269,9 @@ function Inspector({ entities, node, services, updateNodeData }) {
       )}
       {data.kind === 'debug' && (
         <label>Message<input value={data.message ?? ''} onChange={(event) => updateNodeData({ message: event.target.value })} /></label>
+      )}
+      {data.kind === 'comment' && (
+        <label>Comment<textarea value={data.text ?? ''} onChange={(event) => updateNodeData({ text: event.target.value })} placeholder="Describe why this part of the flow exists." /></label>
       )}
     </div>
   )
@@ -3249,6 +3641,151 @@ function SharedAttributes({ attributes, payload, updateNodeData }) {
       )}
     </div>
   )
+}
+
+function ServicePayloadBuilder({ entities, payload, service, updateNodeData }) {
+  const payloadObject = parsePayloadObject(payload)
+  const fields = getServicePayloadFields(entities, service)
+  const updatePayload = (key, value, parser = parseAttributeValue) => {
+    updateNodeData({ payload: JSON.stringify({ ...payloadObject, [key]: parser(value) }, null, 2) })
+  }
+
+  if (!fields.length) return null
+
+  return (
+    <div className="shared-attributes service-payload-builder">
+      <div className="mini-heading">Service payload builder</div>
+      <div className="service-payload-grid">
+        {fields.map((field) => (
+          <label key={field.key}>
+            {field.label}
+            {field.type === 'color' ? (
+              <ColorValueInput
+                attribute={{ key: field.key, sample: field.sample }}
+                onChange={(value) => updatePayload(field.key, value, (nextValue) => nextValue)}
+                value={payloadObject[field.key]}
+              />
+            ) : field.options?.length ? (
+              <select value={formatAttributeInput(payloadObject[field.key] ?? '')} onChange={(event) => updatePayload(field.key, event.target.value, field.parser)}>
+                <option value="">Choose {field.label}</option>
+                {field.options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+            ) : (
+              <input
+                max={field.max}
+                min={field.min}
+                onChange={(event) => updatePayload(field.key, event.target.value, field.parser)}
+                placeholder={field.placeholder}
+                type={field.inputType || 'text'}
+                value={formatAttributeInput(payloadObject[field.key] ?? '')}
+              />
+            )}
+          </label>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function getServicePayloadFields(entities, service) {
+  const domains = Array.from(new Set(entities.map((entity) => entity.domain || String(entity.entity_id).split('.')[0]).filter(Boolean)))
+  const fields = []
+  const hasDomain = (domain) => domains.includes(domain)
+  const addField = (field) => {
+    if (!fields.some((item) => item.key === field.key)) fields.push(field)
+  }
+
+  if (hasDomain('light') && service === 'turn_on') {
+    addField({ key: 'brightness_pct', label: 'Brightness', options: percentOptions([1, 5, 10, 25, 50, 75, 100]) })
+    addField({ key: 'transition', label: 'Transition Time', options: durationOptions() })
+    addField({ key: 'color_temp_kelvin', label: 'Color Temperature', options: kelvinOptions(entities) })
+    addField({ key: 'rgb_color', label: 'Color', type: 'color', sample: [255, 255, 255] })
+    const effectOptions = intersectArrayAttributeOptions(entities.filter((entity) => entity.domain === 'light'), 'effect_list')
+    if (effectOptions.length) addField({ key: 'effect', label: 'Effect', options: effectOptions })
+  }
+
+  if (hasDomain('fan') && service === 'turn_on') {
+    addField({ key: 'percentage', label: 'Fan Speed', options: percentOptions([10, 25, 50, 75, 100]) })
+    const presetOptions = intersectArrayAttributeOptions(entities.filter((entity) => entity.domain === 'fan'), 'preset_modes')
+    if (presetOptions.length) addField({ key: 'preset_mode', label: 'Preset Mode', options: presetOptions })
+  }
+
+  if (hasDomain('cover') && service === 'set_cover_position') {
+    addField({ key: 'position', label: 'Cover Position', options: percentOptions([0, 10, 25, 50, 75, 90, 100]) })
+  }
+
+  if (hasDomain('climate') && ['set_hvac_mode', 'set_temperature'].includes(service)) {
+    const hvacOptions = intersectArrayAttributeOptions(entities.filter((entity) => entity.domain === 'climate'), 'hvac_modes')
+    if (hvacOptions.length) addField({ key: 'hvac_mode', label: 'HVAC Mode', options: hvacOptions })
+    addField({ key: 'temperature', label: 'Temperature', inputType: 'number', parser: parseNumberPayload, placeholder: '72' })
+  }
+
+  if (hasDomain('input_number') && service === 'set_value') {
+    addField({ key: 'value', label: 'Value', inputType: 'number', parser: parseNumberPayload, placeholder: inputNumberPlaceholder(entities) })
+  }
+
+  if (hasDomain('input_select') && service === 'select_option') {
+    const optionChoices = intersectArrayAttributeOptions(entities.filter((entity) => entity.domain === 'input_select'), 'options')
+    addField({ key: 'option', label: 'Option', options: optionChoices })
+  }
+
+  if (hasDomain('media_player') && ['volume_set', 'play_media'].includes(service)) {
+    if (service === 'volume_set') addField({ key: 'volume_level', label: 'Volume', options: percentOptions([0, 10, 25, 50, 75, 100], (value) => value / 100) })
+    if (service === 'play_media') {
+      addField({ key: 'media_content_type', label: 'Media Type', options: [
+        { value: 'music', label: 'Music' },
+        { value: 'playlist', label: 'Playlist' },
+        { value: 'video', label: 'Video' },
+        { value: 'channel', label: 'Channel' },
+        { value: 'url', label: 'URL' },
+      ] })
+      addField({ key: 'media_content_id', label: 'Media Content ID', placeholder: 'Media URL or content ID' })
+    }
+  }
+
+  return fields
+}
+
+function percentOptions(values, transform = (value) => value) {
+  return values.map((value) => ({ value: String(transform(value)), label: `${value}%` }))
+}
+
+function durationOptions() {
+  return [
+    { value: '0', label: 'Instant' },
+    { value: '1', label: '1 second' },
+    { value: '3', label: '3 seconds' },
+    { value: '5', label: '5 seconds' },
+    { value: '10', label: '10 seconds' },
+    { value: '30', label: '30 seconds' },
+  ]
+}
+
+function kelvinOptions(entities) {
+  const lights = entities.filter((entity) => entity.domain === 'light')
+  const mins = lights.map((entity) => Number(entity.attributes?.min_color_temp_kelvin)).filter(Boolean)
+  const maxes = lights.map((entity) => Number(entity.attributes?.max_color_temp_kelvin)).filter(Boolean)
+  const min = mins.length ? Math.max(...mins) : 2000
+  const max = maxes.length ? Math.min(...maxes) : 6500
+  return [
+    { value: '2200', label: 'Warm candlelight' },
+    { value: '2700', label: 'Warm white' },
+    { value: '3500', label: 'Soft white' },
+    { value: '4500', label: 'Cool white' },
+    { value: '6500', label: 'Daylight' },
+  ].filter((option) => Number(option.value) >= min && Number(option.value) <= max)
+}
+
+function inputNumberPlaceholder(entities) {
+  const mins = entities.map((entity) => Number(entity.attributes?.min)).filter(Number.isFinite)
+  const maxes = entities.map((entity) => Number(entity.attributes?.max)).filter(Number.isFinite)
+  if (mins.length && maxes.length) return `${Math.max(...mins)}-${Math.min(...maxes)}`
+  return 'Number'
+}
+
+function parseNumberPayload(value) {
+  const numberValue = Number(value)
+  return Number.isFinite(numberValue) ? numberValue : value
 }
 
 function ColorValueInput({ attribute, value, onChange }) {

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.43
+
+- Add a Test Selected Node action that previews what the selected node would do without running the full flow or calling services.
+- Add prefilled entity filters for area, type, state, and whether an entity is already used in the current flow.
+- Add Comment nodes for readable canvas notes that do not change how flows run.
+- Add Flow Recipes that create editable flows from real selected Home Assistant entities.
+- Add a service payload builder with readable controls and prefilled dropdowns for common Home Assistant service options.
+
 ## 0.1.42
 
 - Let Action nodes split `turn_on` and `turn_off` calls by selected entity ID domain, so mixed lights, switches, and helpers can be controlled from one node.
