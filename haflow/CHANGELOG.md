@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.58
+
+- Avoid auto-selecting weak Recipe or Voice entity matches such as a generic lamp when the requested name includes more specific words.
+- Prefer strong area/name matches, such as Living Room Reading Lamp, and leave weak single matches as Inspector suggestions.
+
 ## 0.1.57
 
 - Use Home Assistant entity attributes, domains, states, and value options when resolving described Recipe and Voice flows.

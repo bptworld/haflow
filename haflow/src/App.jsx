@@ -1216,11 +1216,18 @@ function buildRecipeEntityHints(entities = []) {
     .flatMap((entity) => {
       const entityId = String(entity.entity_id)
       const domain = entity.domain || entityId.split('.')[0]
+      const areaName = entity.areaName || ''
+      const friendlyName = entity.friendlyName || entity.attributes?.friendly_name || entity.name || ''
+      const areaFriendlyName = areaName && friendlyName && !normalizeRecipeText(friendlyName).startsWith(normalizeRecipeText(areaName))
+        ? `${areaName} ${friendlyName}`
+        : ''
       const names = new Set([
-        entity.friendlyName,
+        friendlyName,
         entity.friendly_name,
         entity.attributes?.friendly_name,
         entity.name,
+        areaFriendlyName,
+        areaName && entity.deviceType ? `${areaName} ${entity.deviceType}` : '',
         entityId.split('.').slice(1).join('.').replace(/_/g, ' '),
       ].filter(Boolean).map(String))
       for (const name of Array.from(names)) {
@@ -1266,13 +1273,17 @@ function resolveRecipeEntityHint(label, entityHints = [], preferredDomains = [])
       const normalizedSearchName = normalizeRecipeText([normalizedName, normalizedEntity, hintDeviceText].filter(Boolean).join(' '))
       const exact = normalizedName === normalizedLabel || normalizedEntity === normalizedLabel
       const contains = normalizedName.includes(normalizedLabel) || normalizedLabel.includes(normalizedName) || normalizedEntity.includes(normalizedLabel)
-      const labelCoverage = recipeTextSimilarity(normalizedLabel, normalizedSearchName)
-      const close = recipeTextSimilarity(normalizedLabel, normalizedName) >= 0.45 || recipeTextSimilarity(normalizedLabel, normalizedEntity) >= 0.45 || labelCoverage >= 0.72
+      const nameCoverage = recipeTextSimilarity(normalizedLabel, normalizedName)
+      const entityCoverage = recipeTextSimilarity(normalizedLabel, normalizedEntity)
+      const searchCoverage = recipeTextSimilarity(normalizedLabel, normalizedSearchName)
+      const matchCoverage = Math.max(nameCoverage, entityCoverage, searchCoverage)
+      const close = nameCoverage >= 0.45 || entityCoverage >= 0.45 || searchCoverage >= 0.72
       if (!entityId || (!exact && !contains && !close)) return null
+      const specificContains = contains && recipeHasSpecificEntityName(normalizedName) && Math.max(nameCoverage, entityCoverage) >= 0.5
       const domainScore = !allowedDomains.size || allowedDomains.has(domain) ? 20 : 0
       const exactScore = exact ? 40 : 0
       const containsScore = contains ? 24 : 0
-      const closeScore = close ? Math.round(labelCoverage * 18) : 0
+      const closeScore = close ? Math.round(matchCoverage * 18) : 0
       const lengthScore = Math.max(0, 20 - Math.abs(normalizedName.length - normalizedLabel.length))
       return {
         entityId,
@@ -1282,18 +1293,20 @@ function resolveRecipeEntityHint(label, entityHints = [], preferredDomains = [])
         deviceType: hint.deviceType || '',
         state: hint.state || '',
         valueOptions: hint.valueOptions || [],
-        confident: exact || (contains && domainScore > 0),
+        matchCoverage,
+        confident: exact || (specificContains && domainScore > 0),
         score: domainScore + exactScore + containsScore + closeScore + lengthScore,
       }
     })
     .filter(Boolean)
     .sort((first, second) => second.score - first.score || first.entityId.localeCompare(second.entityId))
   if (!matches.length) return null
-  const suggestions = matches.slice(0, 5).map(({ entityId, domain, name }) => ({ entityId, domain, name }))
+  const suggestions = Array.from(new Map(matches.map(({ entityId, domain, name }) => [entityId, { entityId, domain, name }])).values()).slice(0, 5)
   const preferredMatches = allowedDomains.size ? matches.filter((match) => allowedDomains.has(match.domain)) : matches
   const uniquePreferredEntityIds = new Set(preferredMatches.map((match) => match.entityId))
   const best = matches[0]
-  return { ...best, confident: best.confident || uniquePreferredEntityIds.size === 1, suggestions }
+  const strongSingleMatch = uniquePreferredEntityIds.size === 1 && best.score >= 55 && best.matchCoverage >= 0.72
+  return { ...best, confident: best.confident || strongSingleMatch, suggestions }
 }
 
 function getRecipeConditionDomains(state) {
@@ -1370,6 +1383,12 @@ function stripRecipeEntitySuffixes(value) {
     .replace(/\b(?:binary sensor|contact sensor|contact|sensor|opening sensor|door sensor|window sensor|motion sensor|light entity|switch entity)\b/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
+}
+
+function recipeHasSpecificEntityName(value) {
+  const generic = new Set(['lamp', 'light', 'switch', 'sensor', 'door', 'fan', 'helper'])
+  const tokens = normalizeRecipeMatchTokens(value).filter((token) => !generic.has(token))
+  return tokens.length > 0 || normalizeRecipeMatchTokens(value).length >= 2
 }
 
 function buildRecipeFlow(recipe, values, entities) {

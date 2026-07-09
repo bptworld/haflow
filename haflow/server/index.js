@@ -2038,10 +2038,7 @@ async function getVoiceRecipeEntityHints(body = {}) {
 
   try {
     const states = await haRest('/api/states')
-    return normalizeVoiceEntityHints(states.map((state) => ({
-      entity_id: state.entity_id,
-      name: state.attributes?.friendly_name,
-    })))
+    return normalizeVoiceEntityHints(states)
   } catch {
     return []
   }
@@ -2055,12 +2052,20 @@ function normalizeVoiceEntityHints(items = []) {
     const entityId = String(item.entity_id || item.entityId || item.id || item.value || '').trim()
     if (!entityId.includes('.')) continue
     const domain = String(item.domain || entityId.split('.')[0] || '')
+    const areaName = String(item.areaName || item.area_name || '')
+    const friendlyName = String(item.name || item.friendly_name || item.friendlyName || item.attributes?.friendly_name || '')
+    const areaFriendlyName = areaName && friendlyName && !normalizeVoiceText(friendlyName).startsWith(normalizeVoiceText(areaName))
+      ? `${areaName} ${friendlyName}`
+      : ''
     const names = new Set([
+      friendlyName,
       item.name,
       item.friendly_name,
       item.friendlyName,
       item.label,
       item.text,
+      areaFriendlyName,
+      areaName && item.deviceType ? `${areaName} ${item.deviceType}` : '',
       entityId.split('.').slice(1).join('.').replace(/_/g, ' '),
     ].filter(Boolean).map(String))
     for (const name of Array.from(names)) {
@@ -2112,13 +2117,17 @@ function resolveVoiceEntityHint(label, entityHints = [], preferredDomains = []) 
       const normalizedSearchName = normalizeVoiceText([normalizedName, normalizedEntity, hintDeviceText].filter(Boolean).join(' '))
       const exact = normalizedName === normalizedLabel || normalizedEntity === normalizedLabel
       const contains = normalizedName.includes(normalizedLabel) || normalizedLabel.includes(normalizedName) || normalizedEntity.includes(normalizedLabel)
-      const labelCoverage = voiceTextSimilarity(normalizedLabel, normalizedSearchName)
-      const close = voiceTextSimilarity(normalizedLabel, normalizedName) >= 0.45 || voiceTextSimilarity(normalizedLabel, normalizedEntity) >= 0.45 || labelCoverage >= 0.72
+      const nameCoverage = voiceTextSimilarity(normalizedLabel, normalizedName)
+      const entityCoverage = voiceTextSimilarity(normalizedLabel, normalizedEntity)
+      const searchCoverage = voiceTextSimilarity(normalizedLabel, normalizedSearchName)
+      const matchCoverage = Math.max(nameCoverage, entityCoverage, searchCoverage)
+      const close = nameCoverage >= 0.45 || entityCoverage >= 0.45 || searchCoverage >= 0.72
       if (!entityId || (!exact && !contains && !close)) return null
+      const specificContains = contains && voiceHasSpecificEntityName(normalizedName) && Math.max(nameCoverage, entityCoverage) >= 0.5
       const domainScore = !allowedDomains.size || allowedDomains.has(domain) ? 20 : 0
       const exactScore = exact ? 40 : 0
       const containsScore = contains ? 24 : 0
-      const closeScore = close ? Math.round(labelCoverage * 18) : 0
+      const closeScore = close ? Math.round(matchCoverage * 18) : 0
       const lengthScore = Math.max(0, 20 - Math.abs(normalizedName.length - normalizedLabel.length))
       return {
         entityId,
@@ -2128,18 +2137,20 @@ function resolveVoiceEntityHint(label, entityHints = [], preferredDomains = []) 
         deviceType: hint.deviceType || '',
         state: hint.state || '',
         valueOptions: hint.valueOptions || [],
-        confident: exact || (contains && domainScore > 0),
+        matchCoverage,
+        confident: exact || (specificContains && domainScore > 0),
         score: domainScore + exactScore + containsScore + closeScore + lengthScore,
       }
     })
     .filter(Boolean)
     .sort((first, second) => second.score - first.score || first.entityId.localeCompare(second.entityId))
   if (!matches.length) return null
-  const suggestions = matches.slice(0, 5).map(({ entityId, domain, name }) => ({ entityId, domain, name }))
+  const suggestions = Array.from(new Map(matches.map(({ entityId, domain, name }) => [entityId, { entityId, domain, name }])).values()).slice(0, 5)
   const preferredMatches = allowedDomains.size ? matches.filter((match) => allowedDomains.has(match.domain)) : matches
   const uniquePreferredEntityIds = new Set(preferredMatches.map((match) => match.entityId))
   const best = matches[0]
-  return { ...best, confident: best.confident || uniquePreferredEntityIds.size === 1, suggestions }
+  const strongSingleMatch = uniquePreferredEntityIds.size === 1 && best.score >= 55 && best.matchCoverage >= 0.72
+  return { ...best, confident: best.confident || strongSingleMatch, suggestions }
 }
 
 function getVoiceConditionDomains(state) {
@@ -2216,6 +2227,12 @@ function stripVoiceEntitySuffixes(value) {
     .replace(/\b(?:binary sensor|contact sensor|contact|sensor|opening sensor|door sensor|window sensor|motion sensor|light entity|switch entity)\b/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
+}
+
+function voiceHasSpecificEntityName(value) {
+  const generic = new Set(['lamp', 'light', 'switch', 'sensor', 'door', 'fan', 'helper'])
+  const tokens = normalizeVoiceMatchTokens(value).filter((token) => !generic.has(token))
+  return tokens.length > 0 || normalizeVoiceMatchTokens(value).length >= 2
 }
 
 function buildVoiceRecipeFlow(description, { entityHints = [] } = {}) {

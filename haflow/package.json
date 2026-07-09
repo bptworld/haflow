@@ -1,7 +1,7 @@
 {
   "name": "haflow",
   "private": true,
-  "version": "0.1.57",
+  "version": "0.1.58",
   "type": "module",
   "scripts": {
     "dev": "concurrently -k -n server,client \"npm run server\" \"npm run client\"",
