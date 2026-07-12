@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.60
+
+- Add 5% dim and brighten steps to light actions while preventing conflicting absolute brightness values.
+
 ## 0.1.59
 
 - Add up to three actionable Android and Apple Companion App notification buttons to Notify nodes.
