@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.59
+
+- Add up to three actionable Android and Apple Companion App notification buttons to Notify nodes.
+- Continue flows through named button outputs or a Timeout output, with configurable response time and resend attempts.
+- Correlate notification responses to the correct flow run and preserve cancellation safety during waits.
+- Add an Actionable Yes/No Reminder recipe demonstrating delayed follow-up and timeout handling.
+
 ## 0.1.58
 
 - Avoid auto-selecting weak Recipe or Voice entity matches such as a generic lamp when the requested name includes more specific words.

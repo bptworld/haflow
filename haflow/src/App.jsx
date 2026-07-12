@@ -160,6 +160,35 @@ const FLOW_RECIPES = [
       ], defaultValue: '19:00' },
     ],
   },
+  {
+    id: 'actionable-reminder',
+    name: 'Actionable Yes/No Reminder',
+    description: 'Ask any Yes/No question, end on Yes, or wait and send the question again after No. Includes a Timeout path.',
+    fields: [
+      { id: 'question', label: 'Question', type: 'text', defaultValue: 'Did you complete the task?' },
+      { id: 'notifyService', label: 'Notification Service', type: 'notifyService' },
+      { id: 'timeOfDay', label: 'First Reminder Time', type: 'choice', options: [
+        { value: '08:00', label: '8:00 AM' },
+        { value: '09:00', label: '9:00 AM' },
+        { value: '12:00', label: '12:00 PM' },
+        { value: '18:00', label: '6:00 PM' },
+        { value: '20:00', label: '8:00 PM' },
+      ], defaultValue: '09:00' },
+      { id: 'reminderDelay', label: 'Wait After No', type: 'choice', options: RECIPE_WAIT_OPTIONS, defaultValue: '1800' },
+      { id: 'responseTimeout', label: 'Response Timeout', type: 'choice', options: [
+        { value: '60', label: '1 minute' },
+        { value: '300', label: '5 minutes' },
+        { value: '900', label: '15 minutes' },
+        { value: '1800', label: '30 minutes' },
+      ], defaultValue: '300' },
+      { id: 'resendCount', label: 'Resend Attempts', type: 'choice', options: [
+        { value: '0', label: 'None' },
+        { value: '1', label: '1 resend' },
+        { value: '2', label: '2 resends' },
+        { value: '3', label: '3 resends' },
+      ], defaultValue: '0' },
+    ],
+  },
 ]
 const BINARY_SENSOR_STATE_LABELS = {
   battery: { on: 'Low', off: 'Normal' },
@@ -311,7 +340,7 @@ const nodeCatalog = [
     description: 'Sends a Home Assistant notification message. Use {direction} after a Direction node.',
     icon: Bell,
     color: '#be123c',
-    data: { message: 'HAFlow ran', notifyService: '', target: '', title: '', dataJson: '{}', pushoverPriority: '', pushoverSound: '', label: 'Notify' },
+    data: { message: 'HAFlow ran', notifyService: '', target: '', title: '', dataJson: '{}', notifyActions: [], notifyTimeoutSeconds: 60, notifyResendCount: 0, pushoverPriority: '', pushoverSound: '', label: 'Notify' },
   },
   {
     type: 'scene',
@@ -568,6 +597,22 @@ function NodeBody({ data, selected }) {
           )
         ))}
       </div>
+      {data.kind === 'notify' && (data.notifyActions ?? []).some((action) => String(action?.title ?? '').trim() && String(action?.action ?? '').trim() !== 'URI') && (
+        <div className="notify-node-branches">
+          {(data.notifyActions ?? []).slice(0, 3).map((action, index) => (
+            String(action?.title ?? '').trim() && String(action?.action ?? '').trim() !== 'URI' ? (
+              <div className="notify-node-branch" key={`action-${index}`}>
+                <span>{String(action.title)}</span>
+                <Handle className="notify-branch-handle" id={`action-${index}`} title={String(action.title)} type="source" position={Position.Right} />
+              </div>
+            ) : null
+          ))}
+          <div className="notify-node-branch notify-node-timeout">
+            <span>Timeout</span>
+            <Handle className="notify-branch-handle notify-timeout-handle" id="timeout" title="Timeout" type="source" position={Position.Right} />
+          </div>
+        </div>
+      )}
       {data.delayRemainingMs !== undefined && <div className="node-countdown">Remaining {formatDuration(data.delayRemainingMs)}</div>}
       {data.lastExecutedAt && <div className="node-executed">Last run {formatNodeRunTime(data.lastExecutedAt)}</div>}
       {disabled && <div className="node-disabled"><Ban size={13} /> Disabled</div>}
@@ -578,7 +623,8 @@ function NodeBody({ data, selected }) {
           <Handle className="condition-handle condition-true" id="true" type="source" position={Position.Right} title="True" />
           <Handle className="condition-handle condition-false" id="false" type="source" position={Position.Right} title="False" />
         </>
-      ) : data.kind === 'end' ? null : (
+      ) : data.kind === 'notify' && (data.notifyActions ?? []).some((action) => String(action?.title ?? '').trim() && String(action?.action ?? '').trim() !== 'URI') ? null
+        : data.kind === 'end' ? null : (
         <Handle type="source" position={Position.Right} />
       )}
     </div>
@@ -621,7 +667,11 @@ function summarizeNode(data) {
     if (data.actionEntities?.length) return [serviceIntent, formatTargetSummary(data.actionEntities)]
     return selectedCount ? [serviceIntent, `${selectedCount} targets`] : 'Choose entities'
   }
-  if (data.kind === 'notify') return data.notifyService ? `Notify notify.${data.notifyService}` : data.target ? `Notify ${data.target}` : data.message || 'Notification'
+  if (data.kind === 'notify') {
+    const actionCount = (data.notifyActions ?? []).filter((action) => String(action?.title ?? '').trim()).length
+    const target = data.notifyService ? `Notify notify.${data.notifyService}` : data.target ? `Notify ${data.target}` : data.message || 'Notification'
+    return actionCount ? [target, `${actionCount} button${actionCount === 1 ? '' : 's'} · ${Number(data.notifyTimeoutSeconds ?? 60)}s timeout · ${Number(data.notifyResendCount ?? 0)} resend${Number(data.notifyResendCount ?? 0) === 1 ? '' : 's'}`] : target
+  }
   if (data.kind === 'scene') return data.entityId ? `Turn on ${entityName}` : 'Choose a scene'
   if (data.kind === 'group') return 'Same-screen subflow'
   if (data.kind === 'comment') return data.text || 'Add a note about this flow.'
@@ -957,6 +1007,17 @@ function validateNodeData(data, entityById = new Map(), services = {}) {
     } catch {
       return 'Bad data JSON'
     }
+  }
+  if (data.kind === 'notify') {
+    const incompleteAction = (data.notifyActions ?? []).find((action) => {
+      const hasAnyValue = action?.title || action?.action || action?.uri
+      return hasAnyValue && !String(action.title ?? '').trim()
+    })
+    if (incompleteAction) return 'Notification buttons need a label'
+    const timeoutSeconds = Number(data.notifyTimeoutSeconds ?? 60)
+    const resendCount = Number(data.notifyResendCount ?? 0)
+    if (!Number.isFinite(timeoutSeconds) || timeoutSeconds < 1) return 'Notification timeout must be at least 1 second'
+    if (!Number.isInteger(resendCount) || resendCount < 0) return 'Notification resends must be a non-negative whole number'
   }
   if (data.kind === 'scene' && !data.entityId) return 'Missing scene'
   if (data.kind === 'scene' && data.entityId && !entityExists(data.entityId)) return 'Scene not found'
@@ -1456,6 +1517,57 @@ function buildRecipeFlow(recipe, values, entities) {
         { id: sceneId, type: 'haflow', position: { x: 380, y: 120 }, data: { kind: 'scene', label: `Turn On ${label(sceneEntity)}`, entityId: sceneEntity } },
       ],
       edges: [{ id: `${scheduleId}-${sceneId}`, source: scheduleId, target: sceneId, animated: true }],
+    }
+  }
+
+  if (recipe.id === 'actionable-reminder') {
+    const question = String(values.question || 'Did you complete the task?').trim()
+    const notifyService = values.notifyService || ''
+    const timeOfDay = values.timeOfDay || '09:00'
+    const reminderDelay = Number(values.reminderDelay || 1800)
+    const responseTimeout = Number(values.responseTimeout || 300)
+    const resendCount = Number(values.resendCount || 0)
+    const scheduleId = id('schedule')
+    const questionId = id('question')
+    const yesEndId = id('yes-end')
+    const noDelayId = id('no-delay')
+    const timeoutEndId = id('timeout-end')
+    const repeatId = id('repeat-question')
+    const repeatEndId = id('repeat-end')
+    const notifyData = (message, labelText) => ({
+      kind: 'notify',
+      label: labelText,
+      notifyService,
+      target: notifyService,
+      title: 'Reminder',
+      message,
+      dataJson: '{}',
+      notifyActions: [{ title: 'Yes', action: '' }, { title: 'No', action: '' }],
+      notifyTimeoutSeconds: responseTimeout,
+      notifyResendCount: resendCount,
+      pushoverPriority: '',
+      pushoverSound: '',
+    })
+    return {
+      nodes: [
+        { id: scheduleId, type: 'haflow', position: { x: 80, y: 240 }, data: { kind: 'time', label: `Every Day At ${timeOfDay}`, scheduleMode: 'at', atType: 'time', at: timeOfDay, days: [] } },
+        { id: questionId, type: 'haflow', position: { x: 380, y: 240 }, data: notifyData(question, 'Ask Yes Or No') },
+        { id: yesEndId, type: 'haflow', position: { x: 720, y: 60 }, data: { kind: 'end', label: 'Yes — Complete' } },
+        { id: noDelayId, type: 'haflow', position: { x: 720, y: 260 }, data: { kind: 'delay', label: `Wait ${formatDuration(reminderDelay * 1000)}`, seconds: reminderDelay } },
+        { id: timeoutEndId, type: 'haflow', position: { x: 720, y: 480 }, data: { kind: 'end', label: 'No Response — End' } },
+        { id: repeatId, type: 'haflow', position: { x: 1040, y: 260 }, data: notifyData(`Reminder: ${question}`, 'Ask Again') },
+        { id: repeatEndId, type: 'haflow', position: { x: 1380, y: 260 }, data: { kind: 'end', label: 'Second Response — End' } },
+      ],
+      edges: [
+        { id: `${scheduleId}-${questionId}`, source: scheduleId, target: questionId, animated: true },
+        { id: `${questionId}-${yesEndId}`, source: questionId, sourceHandle: 'action-0', target: yesEndId, animated: true },
+        { id: `${questionId}-${noDelayId}`, source: questionId, sourceHandle: 'action-1', target: noDelayId, animated: true },
+        { id: `${questionId}-${timeoutEndId}`, source: questionId, sourceHandle: 'timeout', target: timeoutEndId, animated: true },
+        { id: `${noDelayId}-${repeatId}`, source: noDelayId, target: repeatId, animated: true },
+        { id: `${repeatId}-yes-${repeatEndId}`, source: repeatId, sourceHandle: 'action-0', target: repeatEndId, animated: true },
+        { id: `${repeatId}-no-${repeatEndId}`, source: repeatId, sourceHandle: 'action-1', target: repeatEndId, animated: true },
+        { id: `${repeatId}-timeout-${repeatEndId}`, source: repeatId, sourceHandle: 'timeout', target: repeatEndId, animated: true },
+      ],
     }
   }
 
@@ -2835,6 +2947,7 @@ function FlowWorkspace() {
       const next = { ...current }
       for (const field of selectedRecipe.fields) {
         if (next[field.id]) continue
+        if (field.type === 'text') next[field.id] = field.defaultValue || ''
         if (field.type === 'choice') next[field.id] = field.defaultValue || field.options?.[0]?.value || ''
         if (field.type === 'notifyService') next[field.id] = notifyServiceOptions[0]?.value ?? ''
         if (field.type === 'entity') {
@@ -4244,6 +4357,10 @@ function EntityInput({ entities, placeholder, value, onChange }) {
 }
 
 function RecipeField({ entities, field, notifyServiceOptions, onChange, value }) {
+  if (field.type === 'text') {
+    return <label>{field.label}<input onChange={(event) => onChange(event.target.value)} placeholder={field.defaultValue || field.label} type="text" value={value ?? ''} /></label>
+  }
+
   if (field.type === 'entity') {
     const options = getRecipeEntityOptions(entities, field)
     return (
@@ -4719,6 +4836,32 @@ function Inspector({ entities, node, nodeTestResult, onTestNode, services, updat
           <label>Message<input value={data.message ?? ''} onChange={(event) => updateNodeData({ message: event.target.value })} placeholder="Driveway motion: {direction}" /></label>
           <p className="field-note">Use {'{direction}'} to include the latest Direction node result.</p>
           <label>Title<input value={data.title ?? ''} onChange={(event) => updateNodeData({ title: event.target.value })} placeholder="Optional" /></label>
+          <div className="notify-action-options">
+            <span className="field-label">Action buttons</span>
+            <p className="field-note">Requires the Home Assistant Companion App on the receiving Android or Apple device.</p>
+            <p className="field-note">Add up to three buttons. HAFlow safely correlates action events to this flow run. For links, use action ID URI; link buttons open directly and do not resume a branch.</p>
+            {[0, 1, 2].map((index) => {
+              const action = data.notifyActions?.[index] ?? {}
+              const updateAction = (patch) => {
+                const notifyActions = Array.from({ length: 3 }, (_, actionIndex) => ({ ...(data.notifyActions?.[actionIndex] ?? {}) }))
+                notifyActions[index] = { ...notifyActions[index], ...patch }
+                updateNodeData({ notifyActions })
+              }
+              return (
+                <div className="notify-action-row" key={index}>
+                  <span>Button {index + 1}</span>
+                  <input value={action.title ?? ''} onChange={(event) => updateAction({ title: event.target.value })} placeholder="Label (for example, Close)" />
+                  <input value={action.action ?? ''} onChange={(event) => updateAction({ action: event.target.value })} placeholder="Optional action ID (generated from label)" />
+                  <input value={action.uri ?? ''} onChange={(event) => updateAction({ uri: event.target.value })} placeholder="Optional URI or dashboard path" />
+                </div>
+              )
+            })}
+            <div className="field-grid">
+              <label>Response timeout (seconds)<input min="1" value={data.notifyTimeoutSeconds ?? 60} onChange={(event) => updateNodeData({ notifyTimeoutSeconds: Number(event.target.value) })} type="number" /></label>
+              <label>Number of resends<input min="0" step="1" value={data.notifyResendCount ?? 0} onChange={(event) => updateNodeData({ notifyResendCount: Number(event.target.value) })} type="number" /></label>
+            </div>
+            <p className="field-note">Resends are additional attempts after the first send. After the last response timeout, the flow follows the Timeout output.</p>
+          </div>
           {notifyIsPushover && (
             <div className="notify-service-options">
               <div className="field-grid">

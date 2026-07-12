@@ -119,6 +119,9 @@ HAFlow is a Home Assistant app for building and running flow-based automations.
 - Select available Home Assistant notify services.
 - Use custom notify service targets.
 - Configure message and title fields.
+- Add up to three actionable notification buttons with action IDs and optional dashboard or URL targets; actionable buttons require the Home Assistant Companion App on the receiving device.
+- Continue through the output for the pressed notification button, or through Timeout after configurable response time and resend attempts.
+- Show each notification button label as a named output on the flow node, enabling patterns such as Yes to close a garage door and No to end the branch.
 - Configure a data JSON field.
 - Include the latest Direction node result with `{direction}`.
 - Select Pushover priority from a dropdown.
@@ -178,3 +181,4 @@ HAFlow is a Home Assistant app for building and running flow-based automations.
 - `2-button-pico-example.json`
 - Starter Pack import support.
 - Flow Recipes for motion light timeout, door-left-open notification, and scheduled scene flows.
+- An actionable Yes/No reminder recipe demonstrating button branches, delayed follow-up, resends, and timeout handling.
