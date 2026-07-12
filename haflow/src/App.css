@@ -1285,6 +1285,70 @@ textarea:focus {
   margin-bottom: 10px;
 }
 
+.notify-action-options {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.notify-action-options .field-note {
+  margin: -2px 0 2px;
+}
+
+.notify-action-row {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid #dbe3ec;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.notify-action-row > span,
+.field-label {
+  color: #475569;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.notify-branch-handle {
+  width: 12px;
+  height: 12px;
+  background: #be123c;
+  border-color: #fff;
+}
+
+.notify-node-branches {
+  display: grid;
+  gap: 4px;
+  margin: 9px -10px -2px 0;
+}
+
+.notify-node-branch {
+  position: relative;
+  min-height: 22px;
+  padding: 3px 18px 3px 7px;
+  color: #9f1239;
+  background: #fff1f2;
+  border-radius: 5px 0 0 5px;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.notify-node-branch .notify-branch-handle {
+  top: 50%;
+  right: -6px;
+}
+
+.notify-node-timeout {
+  color: #92400e;
+  background: #fffbeb;
+}
+
+.notify-timeout-handle {
+  background: #b45309;
+}
+
 .schedule-range,
 .schedule-point {
   display: grid;

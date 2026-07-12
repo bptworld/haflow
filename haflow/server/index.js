@@ -38,6 +38,7 @@ let cachedFlow = { nodes: [], edges: [] }
 let cachedFlowMeta = { id: 'default', name: 'Default Flow', paused: false }
 let runnableFlowCache = null
 let waiters = []
+let notificationActionWaiters = []
 let deviceRegistryById = new Map()
 let entityRegistryDeviceByEntityId = new Map()
 const ANY_CHANGE = '__changed__'
@@ -526,8 +527,15 @@ async function walk(node, nodesById, edges, visited, options = {}) {
 
   broadcastNodeState('start', node, { runId: options.runId })
   let shouldContinue = false
+  let sourceHandle = ''
   try {
-    shouldContinue = options.skipStartExecution === node.id ? true : await executeNode(node, { ...options, nodesById, edges })
+    const executionResult = options.skipStartExecution === node.id ? true : await executeNode(node, { ...options, nodesById, edges })
+    if (executionResult && typeof executionResult === 'object') {
+      shouldContinue = executionResult.shouldContinue !== false
+      sourceHandle = String(executionResult.sourceHandle ?? '')
+    } else {
+      shouldContinue = Boolean(executionResult)
+    }
     throwIfCancelled(options.signal)
   } finally {
     broadcastNodeState(shouldContinue ? 'finish' : 'stop', node, { runId: options.runId })
@@ -537,9 +545,12 @@ async function walk(node, nodesById, edges, visited, options = {}) {
 
   const nextEdges = edges.filter((edge) => {
     if (edge.source !== node.id) return false
-    if (node.data?.kind !== 'condition') return true
-    const expectedHandle = shouldContinue ? 'true' : 'false'
-    return (edge.sourceHandle || 'true') === expectedHandle
+    if (node.data?.kind === 'condition') {
+      const expectedHandle = shouldContinue ? 'true' : 'false'
+      return (edge.sourceHandle || 'true') === expectedHandle
+    }
+    if (sourceHandle) return edge.sourceHandle === sourceHandle
+    return true
   })
   await Promise.all(nextEdges.map((edge) => walk(nodesById.get(edge.target), nodesById, edges, visited, options)))
 }
@@ -641,10 +652,40 @@ async function executeNode(node, options = {}) {
     if (data.title) payload.title = renderRunMessage(data.title, options.context)
     const notifyData = parseNotifyData(data.dataJson)
     applyPushoverNotifyOptions(data, notifyData)
-    if (notifyData && Object.keys(notifyData).length) payload.data = notifyData
-    await callService('notify', service || 'notify', payload)
-    log('info', `Sent notification via notify.${service || 'notify'}.`)
-    return true
+    const actionToken = crypto.randomUUID().replaceAll('-', '')
+    const actionable = applyNotifyActions(data, notifyData, options.context, actionToken)
+    if (actionable.length && !notifyData.tag) notifyData.tag = `haflow_${actionToken}`
+    const configuredTimeout = Number(data.notifyTimeoutSeconds ?? 60)
+    const configuredResends = Number(data.notifyResendCount ?? 0)
+    const timeoutSeconds = Number.isFinite(configuredTimeout) ? Math.max(1, configuredTimeout) : 60
+    const resendCount = Number.isFinite(configuredResends) ? Math.max(0, Math.floor(configuredResends)) : 0
+    const eventActions = actionable.filter((action) => action.waitForResponse)
+    for (let attempt = 0; attempt <= resendCount; attempt += 1) {
+      if (notifyData && Object.keys(notifyData).length) payload.data = notifyData
+      if (!eventActions.length) {
+        await callService('notify', service || 'notify', payload)
+        log('info', `Sent notification via notify.${service || 'notify'}.`)
+        return true
+      }
+      const response = await waitForNotificationAction(
+        eventActions.map((action) => action.action),
+        timeoutSeconds,
+        options.signal,
+        async () => {
+          await callService('notify', service || 'notify', payload)
+          log('info', `Sent notification via notify.${service || 'notify'}${attempt ? ` (resend ${attempt} of ${resendCount})` : ''}.`)
+        },
+      )
+      if (response) {
+        const selected = eventActions.find((action) => action.action === response.action)
+        if (response.replyText !== undefined) options.context.notificationReply = response.replyText
+        log('info', `${data.label || 'Notification'} continued from ${selected?.title || 'button response'}.`)
+        return { shouldContinue: true, sourceHandle: selected?.sourceHandle || '' }
+      }
+      if (attempt < resendCount) log('warn', `${data.label || 'Notification'} received no response after ${timeoutSeconds}s; resending.`)
+    }
+    log('warn', `${data.label || 'Notification'} timed out without a response.`)
+    return { shouldContinue: true, sourceHandle: 'timeout' }
   }
 
   if (data.kind === 'scene') {
@@ -768,7 +809,10 @@ async function previewNode(node, { nodes = [], edges = [] } = {}) {
   if (data.kind === 'notify') {
     const target = normalizeNotifyTarget(data)
     const message = renderRunMessage(data.message || 'HAFlow notification', {})
-    return { status: 'info', title: 'Notification test', details: [`A real run would send "${message}" through ${target || 'notify.notify'}.`] }
+    const actionCount = (Array.isArray(data.notifyActions) ? data.notifyActions : []).filter((action) => String(action?.title ?? '').trim()).length
+    const details = [`A real run would send "${message}" through ${target || 'notify.notify'}.`]
+    if (actionCount) details.push(`It would wait ${Number(data.notifyTimeoutSeconds ?? 60)} seconds per attempt for one of ${actionCount} buttons, with ${Number(data.notifyResendCount ?? 0)} additional resend attempts before Timeout.`)
+    return { status: 'info', title: 'Notification test', details }
   }
 
   if (data.kind === 'scene') {
@@ -1131,6 +1175,8 @@ function applyPushoverNotifyOptions(data, notifyData) {
 
 async function handleHomeAssistantEvent(event) {
   if (!event?.event_type) return
+
+  if (event.event_type === 'mobile_app_notification_action') resolveNotificationActionWaiters(event.data ?? {})
 
   if (event.event_type === 'state_changed' && event.data?.entity_id) {
     resolveEntityWaiters(event.data.entity_id, event.data.new_state?.state, event.data.new_state?.attributes ?? {})
@@ -2090,6 +2136,86 @@ function normalizeVoiceEntityHints(items = []) {
   return hints
 }
 
+function waitForNotificationAction(actionIds, timeoutSeconds, signal, sendNotification) {
+  throwIfCancelled(signal)
+  const expectedActions = new Set(actionIds)
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      clearTimeout(timeout)
+      notificationActionWaiters = notificationActionWaiters.filter((waiter) => waiter !== waiterEntry)
+      signal?.removeEventListener('abort', onAbort)
+    }
+    const onAbort = () => {
+      cleanup()
+      reject(createCancelledError())
+    }
+    const timeout = setTimeout(() => {
+      cleanup()
+      resolve(null)
+    }, timeoutSeconds * 1000)
+    const waiterEntry = {
+      expectedActions,
+      resolve: (response) => {
+        cleanup()
+        resolve(response)
+      },
+    }
+
+    signal?.addEventListener('abort', onAbort, { once: true })
+    notificationActionWaiters.push(waiterEntry)
+    Promise.resolve(sendNotification()).catch((error) => {
+      cleanup()
+      reject(error)
+    })
+  })
+}
+
+function resolveNotificationActionWaiters(eventData) {
+  const action = String(eventData.action ?? '')
+  if (!action) return
+  const matching = notificationActionWaiters.filter((waiter) => waiter.expectedActions.has(action))
+  notificationActionWaiters = notificationActionWaiters.filter((waiter) => !matching.includes(waiter))
+  matching.forEach((waiter) => waiter.resolve({
+    action,
+    replyText: eventData.reply_text,
+  }))
+}
+
+function applyNotifyActions(data, notifyData, context = {}, actionToken = '') {
+  const actions = (Array.isArray(data.notifyActions) ? data.notifyActions : [])
+    .slice(0, 3)
+    .map((action, index) => ({ action, index }))
+    .filter(({ action }) => String(action?.title ?? '').trim())
+    .map(({ action, index }) => {
+      const configuredAction = String(action.action ?? '').trim() || notificationActionId(action.title)
+      const isUri = configuredAction === 'URI'
+      const generatedAction = actionToken && !isUri ? `${configuredAction}_${actionToken}` : configuredAction
+      const result = {
+        title: renderRunMessage(String(action.title).trim(), context),
+        action: generatedAction,
+        sourceHandle: `action-${index}`,
+        waitForResponse: !isUri,
+      }
+      if (String(action.uri ?? '').trim()) result.uri = renderRunMessage(String(action.uri).trim(), context)
+      if (configuredAction === 'REPLY') result.behavior = 'textInput'
+      return result
+    })
+  if (actions.length) {
+    notifyData.actions = actions.map((action) => {
+      const payloadAction = { title: action.title, action: action.action }
+      if (action.uri) payloadAction.uri = action.uri
+      if (action.behavior) payloadAction.behavior = action.behavior
+      return payloadAction
+    })
+  }
+  return actions
+}
+
+function notificationActionId(title) {
+  const normalized = String(title ?? '').trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '')
+  return normalized || 'BUTTON'
+}
+
 function withResolvedVoiceEntity(item, entityHints, preferredDomains = []) {
   const match = resolveVoiceEntityHint(item.label, entityHints, preferredDomains)
   if (!match) return item
@@ -2944,6 +3070,9 @@ function normalizeNodeData(data, nodeId) {
       notifyService: String(data.notifyService || target.replace(/^notify\./, '') || ''),
       title: String(data.title ?? ''),
       dataJson: data.dataJson ?? '{}',
+      notifyActions: Array.isArray(data.notifyActions) ? data.notifyActions.slice(0, 3) : [],
+      notifyTimeoutSeconds: Number.isFinite(Number(data.notifyTimeoutSeconds)) ? Math.max(1, Number(data.notifyTimeoutSeconds)) : 60,
+      notifyResendCount: Number.isFinite(Number(data.notifyResendCount)) ? Math.max(0, Math.floor(Number(data.notifyResendCount))) : 0,
       pushoverPriority: data.pushoverPriority ?? '',
       pushoverSound: data.pushoverSound ?? '',
     }
