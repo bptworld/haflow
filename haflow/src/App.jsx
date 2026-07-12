@@ -5262,8 +5262,11 @@ function SharedAttributes({ attributes, payload, updateNodeData }) {
 function ServicePayloadBuilder({ entities, payload, service, updateNodeData }) {
   const payloadObject = parsePayloadObject(payload)
   const fields = getServicePayloadFields(entities, service)
-  const updatePayload = (key, value, parser = parseAttributeValue) => {
-    updateNodeData({ payload: JSON.stringify({ ...payloadObject, [key]: parser(value) }, null, 2) })
+  const updatePayload = (key, value, parser = parseAttributeValue, exclusiveWith = []) => {
+    const nextPayload = { ...payloadObject }
+    exclusiveWith.forEach((exclusiveKey) => delete nextPayload[exclusiveKey])
+    nextPayload[key] = parser(value)
+    updateNodeData({ payload: JSON.stringify(nextPayload, null, 2) })
   }
 
   if (!fields.length) return null
@@ -5282,7 +5285,7 @@ function ServicePayloadBuilder({ entities, payload, service, updateNodeData }) {
                 value={payloadObject[field.key]}
               />
             ) : field.options?.length ? (
-              <select value={formatAttributeInput(payloadObject[field.key] ?? '')} onChange={(event) => updatePayload(field.key, event.target.value, field.parser)}>
+              <select value={formatAttributeInput(payloadObject[field.key] ?? '')} onChange={(event) => updatePayload(field.key, event.target.value, field.parser, field.exclusiveWith)}>
                 <option value="">Choose {field.label}</option>
                 {field.options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
@@ -5290,7 +5293,7 @@ function ServicePayloadBuilder({ entities, payload, service, updateNodeData }) {
               <input
                 max={field.max}
                 min={field.min}
-                onChange={(event) => updatePayload(field.key, event.target.value, field.parser)}
+                onChange={(event) => updatePayload(field.key, event.target.value, field.parser, field.exclusiveWith)}
                 placeholder={field.placeholder}
                 type={field.inputType || 'text'}
                 value={formatAttributeInput(payloadObject[field.key] ?? '')}
@@ -5312,7 +5315,17 @@ function getServicePayloadFields(entities, service) {
   }
 
   if (hasDomain('light') && service === 'turn_on') {
-    addField({ key: 'brightness_pct', label: 'Brightness', options: percentOptions([1, 5, 10, 25, 50, 75, 100]) })
+    addField({ key: 'brightness_pct', label: 'Brightness', options: percentOptions([1, 5, 10, 25, 50, 75, 100]), exclusiveWith: ['brightness_step_pct'] })
+    addField({
+      key: 'brightness_step_pct',
+      label: 'Brightness Step',
+      options: [
+        { value: '-5', label: 'Dim 5%' },
+        { value: '5', label: 'Brighten 5%' },
+      ],
+      parser: parseNumberPayload,
+      exclusiveWith: ['brightness_pct'],
+    })
     addField({ key: 'transition', label: 'Transition Time', options: durationOptions() })
     addField({ key: 'color_temp_kelvin', label: 'Color Temperature', options: kelvinOptions(entities) })
     addField({ key: 'rgb_color', label: 'Color', type: 'color', sample: [255, 255, 255] })
