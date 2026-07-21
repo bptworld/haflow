@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.62
+
+- Always offer equal, not-equal, greater-than, and less-than operators in Condition nodes instead of depending on entity numeric-type detection.
+
 ## 0.1.61
 
 - Add equal, not-equal, greater-than, and less-than comparisons for numeric state triggers and conditions.

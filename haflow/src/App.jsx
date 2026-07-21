@@ -5269,14 +5269,11 @@ function ConditionRulesEditor({ data, entities, updateNodeData }) {
                 <select value={rule.operator ?? 'equals'} onChange={(event) => updateRule(index, { operator: event.target.value })}>
                   <option value="equals">equals</option>
                   <option value="not_equals">not equals</option>
-                  {numeric ? (
-                    <>
-                      <option value="greater_than">greater than</option>
-                      <option value="greater_than_or_equal">greater than or equal to</option>
-                      <option value="less_than">less than</option>
-                      <option value="less_than_or_equal">less than or equal to</option>
-                    </>
-                  ) : <option value="contains">contains</option>}
+                  <option value="greater_than">greater than</option>
+                  <option value="greater_than_or_equal">greater than or equal to</option>
+                  <option value="less_than">less than</option>
+                  <option value="less_than_or_equal">less than or equal to</option>
+                  <option value="contains">contains</option>
                 </select>
               </label>
               <label>
