@@ -1439,6 +1439,16 @@ textarea:focus {
   gap: 9px;
 }
 
+.trigger-rule-values .trigger-duration-field {
+  grid-column: 1 / -2;
+}
+
+.duration-inputs {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(100px, auto);
+  gap: 7px;
+}
+
 .condition-rule-remove,
 .condition-rule-add {
   justify-self: start;

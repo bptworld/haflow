@@ -30,6 +30,7 @@ let lastTimeKey = ''
 let activeScheduleWindows = new Set()
 let haConfigCache = null
 let runningTriggers = new Map()
+let pendingStateTriggerTimers = new Map()
 let manualRun = null
 let nodeRuntime = new Map()
 let runHistory = []
@@ -44,6 +45,7 @@ let entityRegistryDeviceByEntityId = new Map()
 const ANY_CHANGE = '__changed__'
 const LUTRON_5_BUTTON_PICO_BUTTONS = [1, 2, 5, 3, 4]
 const SCHEDULE_TIME_TYPES = new Set(['time', 'sunrise', 'sunset'])
+const COMPARISON_OPERATORS = new Set(['equals', 'not_equals', 'greater_than', 'greater_than_or_equal', 'less_than', 'less_than_or_equal'])
 
 app.use(express.json({ limit: '10mb' }))
 
@@ -169,6 +171,7 @@ app.patch('/api/flows/:flowId/pause', async (req, res) => {
   if (paused && (config.activeFlowId ?? 'default') === flowId) {
     manualRun?.controller.abort()
     for (const run of runningTriggers.values()) run.controller.abort()
+    clearPendingStateTriggerTimers(flowId)
   }
   log(paused ? 'warn' : 'info', `${flow.name} ${paused ? 'paused' : 'resumed'}.`)
   broadcastRunner()
@@ -379,6 +382,7 @@ app.put('/api/runner', async (req, res) => {
     reconnectHomeAssistant()
     log('info', 'Automatic runner enabled for all unpaused flows.')
   } else {
+    clearPendingStateTriggerTimers()
     log('warn', 'Automatic runner disabled.')
   }
 
@@ -577,10 +581,7 @@ async function executeNode(node, options = {}) {
       const entity = rule.entityId ? await getEntity(rule.entityId) : null
       const actual = getEntityComparableValue(entity, rule.attribute)
       const expected = String(rule.value ?? '')
-      const passed =
-        rule.operator === 'not_equals' ? actual !== expected :
-        rule.operator === 'contains' ? actual.includes(expected) :
-        actual === expected
+      const passed = comparisonMatches(actual, rule.operator, expected)
       return { actual, entityId: rule.entityId, expected, passed }
     }))
     const passed = Boolean(results.length) && (data.conditionMode === 'all' ? results.every((result) => result.passed) : results.some((result) => result.passed))
@@ -718,6 +719,10 @@ async function previewNode(node, { nodes = [], edges = [] } = {}) {
     const details = await Promise.all(rules.map(async (rule) => {
       const entity = rule.entityId ? await getEntity(rule.entityId).catch(() => null) : null
       const current = entity?.state ?? 'unavailable'
+      if (COMPARISON_OPERATORS.has(rule.operator)) {
+        const durationText = getTriggerDurationMs(rule) ? ` for ${formatTriggerDuration(rule)}` : ''
+        return `${rule.entityId || 'Selected entity'} is currently ${current}. This trigger waits until it ${formatPreviewOperator(rule.operator)} ${rule.value}${durationText}.`
+      }
       const fromText = hasStateFilter(rule.from) ? ` from ${rule.from}` : ''
       const toText = hasStateFilter(rule.to) ? ` to ${rule.to}` : ''
       return `${rule.entityId || rule.deviceName || 'Selected device'} is currently ${current}. This trigger waits for a change${fromText}${toText}.`
@@ -749,10 +754,7 @@ async function previewNode(node, { nodes = [], edges = [] } = {}) {
       const entity = rule.entityId ? await getEntity(rule.entityId).catch(() => null) : null
       const actual = getEntityComparableValue(entity, rule.attribute)
       const expected = String(rule.value ?? '')
-      const passed =
-        rule.operator === 'not_equals' ? actual !== expected :
-        rule.operator === 'contains' ? actual.includes(expected) :
-        actual === expected
+      const passed = comparisonMatches(actual, rule.operator, expected)
       return { actual, expected, passed, rule }
     }))
     const passed = data.conditionMode === 'all' ? results.every((result) => result.passed) : results.some((result) => result.passed)
@@ -832,6 +834,10 @@ async function previewNode(node, { nodes = [], edges = [] } = {}) {
 function formatPreviewOperator(operator) {
   if (operator === 'not_equals') return 'is not'
   if (operator === 'contains') return 'contains'
+  if (operator === 'greater_than') return 'is greater than'
+  if (operator === 'greater_than_or_equal') return 'is greater than or equal to'
+  if (operator === 'less_than') return 'is less than'
+  if (operator === 'less_than_or_equal') return 'is less than or equal to'
   return 'is'
 }
 
@@ -1092,10 +1098,7 @@ async function evaluateAndConditionRule(rule) {
   const entity = await getEntity(rule.entityId).catch(() => null)
   const actual = getEntityComparableValue(entity, rule.attribute)
   const expected = String(rule.value ?? '')
-  const passed =
-    rule.operator === 'not_equals' ? actual !== expected :
-    rule.operator === 'contains' ? actual.includes(expected) :
-    actual === expected
+  const passed = comparisonMatches(actual, rule.operator, expected)
   return { passed, reason: `${rule.entityId} ${actual}${passed ? '=' : '!='}${expected}` }
 }
 
@@ -1199,6 +1202,7 @@ async function handleHomeAssistantEvent(event) {
   logDeviceEventIfRelevant(event)
 
   for (const entry of runnableEntries) {
+    updatePendingStateTriggerTimers(entry, event)
     const matches = findMatchingTriggerNodes(entry.flow, event)
     for (const node of matches) {
       triggerNode(entry.flow, entry.meta, node, { reason: event.event_type }).catch((error) => log('error', error.message))
@@ -1229,8 +1233,61 @@ function findMatchingTriggerNodes(flow, event) {
       buttonNumber: rule.buttonNumber ?? data.buttonNumber ?? inferGroupedButtonNumber(node, flow),
     }))
     if (event.event_type !== 'state_changed') return rules.some((rule) => deviceTriggerMatches(rule, event))
-    return rules.some((rule) => stateTriggerMatches(rule, event.data ?? {}) || deviceTriggerMatches(rule, event))
+    return rules.some((rule) => (stateTriggerMatches(rule, event.data ?? {}, true) && !getTriggerDurationMs(rule)) || deviceTriggerMatches(rule, event))
   })
+}
+
+function updatePendingStateTriggerTimers(entry, event) {
+  if (event.event_type !== 'state_changed' || !event.data?.entity_id) return
+  for (const node of entry.flow.nodes ?? []) {
+    if (node.data?.kind !== 'state' || node.data.disabled) continue
+    getStateTriggerRules(node.data).forEach((rule, index) => {
+      const durationMs = getTriggerDurationMs(rule)
+      if (!durationMs || rule.entityId !== event.data.entity_id) return
+      const timerKey = `${entry.meta.id}:${node.id}:${rule.id || index}`
+      if (!stateTriggerMatches(rule, event.data)) {
+        const pending = pendingStateTriggerTimers.get(timerKey)
+        if (pending) clearTimeout(pending)
+        pendingStateTriggerTimers.delete(timerKey)
+        return
+      }
+      if (pendingStateTriggerTimers.has(timerKey)) return
+      const timer = setTimeout(async () => {
+        if (!config.runnerEnabled) {
+          pendingStateTriggerTimers.delete(timerKey)
+          return
+        }
+        const entity = await getEntity(rule.entityId).catch(() => null)
+        if (!entity || !numericComparisonMatches(entity.state, rule.operator, rule.value)) {
+          pendingStateTriggerTimers.delete(timerKey)
+          return
+        }
+        pendingStateTriggerTimers.set(timerKey, null)
+        triggerNode(entry.flow, entry.meta, node, { reason: `state remained ${formatPreviewOperator(rule.operator)} ${rule.value} for ${formatTriggerDuration(rule)}` }).catch((error) => log('error', error.message))
+      }, durationMs)
+      pendingStateTriggerTimers.set(timerKey, timer)
+      log('info', `${entry.meta.name}: ${node.data.label || node.id} waiting ${formatTriggerDuration(rule)} while ${rule.entityId} remains ${formatPreviewOperator(rule.operator)} ${rule.value}.`)
+    })
+  }
+}
+
+function clearPendingStateTriggerTimers(flowId = '') {
+  for (const [key, timer] of pendingStateTriggerTimers) {
+    if (flowId && !key.startsWith(`${flowId}:`)) continue
+    clearTimeout(timer)
+    pendingStateTriggerTimers.delete(key)
+  }
+}
+
+function getTriggerDurationMs(rule) {
+  const duration = Number(rule.duration)
+  if (!Number.isFinite(duration) || duration <= 0 || !COMPARISON_OPERATORS.has(rule.operator)) return 0
+  const multiplier = rule.durationUnit === 'hours' ? 3600000 : rule.durationUnit === 'seconds' ? 1000 : 60000
+  return duration * multiplier
+}
+
+function formatTriggerDuration(rule) {
+  return `${Number(rule.duration)} ${rule.durationUnit || 'minutes'}`
 }
 
 async function triggerNode(flow, flowMeta, node, { reason }) {
@@ -1831,12 +1888,16 @@ function getStateTriggerRules(data) {
       buttonNumber: data.buttonNumber,
       from: data.from ?? '',
       to: data.to ?? '',
+      operator: COMPARISON_OPERATORS.has(data.operator) ? data.operator : '',
+      value: data.value ?? '',
+      duration: data.duration ?? '',
+      durationUnit: ['seconds', 'minutes', 'hours'].includes(data.durationUnit) ? data.durationUnit : 'minutes',
     }]
   }
   return []
 }
 
-function stateTriggerMatches(rule, stateData) {
+function stateTriggerMatches(rule, stateData, requireComparisonEntry = false) {
   if (!rule.entityId && !rule.deviceId) return false
   const hasButtonFilter = rule.buttonNumber !== undefined && rule.buttonNumber !== null && rule.buttonNumber !== ''
   if (rule.entityId && stateData.entity_id !== rule.entityId) {
@@ -1850,7 +1911,32 @@ function stateTriggerMatches(rule, stateData) {
   }
   if (hasStateFilter(rule.from) && stateData.old_state?.state !== rule.from) return false
   if (hasStateFilter(rule.to) && stateData.new_state?.state !== rule.to) return false
+  if (COMPARISON_OPERATORS.has(rule.operator)) {
+    if (!numericComparisonMatches(stateData.new_state?.state, rule.operator, rule.value)) return false
+    if (requireComparisonEntry && numericComparisonMatches(stateData.old_state?.state, rule.operator, rule.value)) return false
+  }
   return true
+}
+
+function numericComparisonMatches(actualValue, operator, expectedValue) {
+  const actual = Number(actualValue)
+  const expected = Number(expectedValue)
+  if (!Number.isFinite(actual) || !Number.isFinite(expected)) return false
+  if (operator === 'not_equals') return actual !== expected
+  if (operator === 'greater_than') return actual > expected
+  if (operator === 'greater_than_or_equal') return actual >= expected
+  if (operator === 'less_than') return actual < expected
+  if (operator === 'less_than_or_equal') return actual <= expected
+  return actual === expected
+}
+
+function comparisonMatches(actual, operator, expected) {
+  if (['greater_than', 'greater_than_or_equal', 'less_than', 'less_than_or_equal'].includes(operator)) {
+    return numericComparisonMatches(actual, operator, expected)
+  }
+  if (operator === 'not_equals') return actual !== expected
+  if (operator === 'contains') return actual.includes(expected)
+  return actual === expected
 }
 
 function getEntityDeviceId(entityId) {
@@ -3107,7 +3193,7 @@ function normalizeConditionRules(data, nodeId) {
       id: rule.id || `${nodeId}-condition-${index + 1}`,
       entityId: String(rule.entityId ?? ''),
       attribute: String(rule.attribute || 'state'),
-      operator: ['equals', 'not_equals', 'contains'].includes(rule.operator) ? rule.operator : 'equals',
+      operator: [...COMPARISON_OPERATORS, 'contains'].includes(rule.operator) ? rule.operator : 'equals',
       value: rule.value ?? '',
     }))
 }
@@ -3123,6 +3209,10 @@ function normalizeStateTriggerRules(data, nodeId) {
         buttonNumber: data.buttonNumber,
         from: data.from ?? '',
         to: data.to ?? '',
+        operator: data.operator ?? '',
+        value: data.value ?? '',
+        duration: data.duration ?? '',
+        durationUnit: data.durationUnit ?? 'minutes',
       }]
       : []
 
@@ -3136,6 +3226,10 @@ function normalizeStateTriggerRules(data, nodeId) {
       buttonNumber: rule.buttonNumber,
       from: rule.from ?? '',
       to: rule.to ?? '',
+      operator: COMPARISON_OPERATORS.has(rule.operator) ? rule.operator : '',
+      value: rule.value ?? '',
+      duration: rule.duration ?? '',
+      durationUnit: ['seconds', 'minutes', 'hours'].includes(rule.durationUnit) ? rule.durationUnit : 'minutes',
     }))
 }
 

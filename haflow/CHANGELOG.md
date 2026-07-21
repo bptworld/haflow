@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.61
+
+- Add equal, not-equal, greater-than, and less-than comparisons for numeric state triggers and conditions.
+- Let numeric triggers require a comparison to remain true for a configurable number of seconds, minutes, or hours before running the flow.
+- Cancel pending duration triggers when the value stops matching and re-arm them only after the comparison resets.
+
 ## 0.1.60
 
 - Add 5% dim and brighten steps to light actions while preventing conflicting absolute brightness values.

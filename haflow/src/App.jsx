@@ -761,6 +761,10 @@ function formatDomainName(domain) {
 }
 
 function formatTriggerIntent(rule, entity) {
+  if (rule.operator && rule.value !== undefined && rule.value !== '') {
+    const duration = isNumericValue(rule.duration) && Number(rule.duration) > 0 ? ` for ${rule.duration} ${rule.durationUnit || 'minutes'}` : ''
+    return `${formatOperatorLabel(rule.operator)} ${rule.value}${duration}`
+  }
   const from = rule.from && rule.from !== ANY_CHANGE ? formatStateOption(rule.from, entity) : ''
   const to = rule.to && rule.to !== ANY_CHANGE ? formatStateOption(rule.to, entity) : ''
   if (from && to) return `${from} -> ${to}`
@@ -778,7 +782,31 @@ function formatConditionIntent(rule, entity) {
 function formatOperatorLabel(operator) {
   if (operator === 'not_equals') return 'not equals'
   if (operator === 'contains') return 'contains'
+  if (operator === 'greater_than') return 'greater than'
+  if (operator === 'greater_than_or_equal') return 'greater than or equal to'
+  if (operator === 'less_than') return 'less than'
+  if (operator === 'less_than_or_equal') return 'less than or equal to'
   return 'equals'
+}
+
+const COMPARISON_OPERATORS = ['equals', 'not_equals', 'greater_than', 'greater_than_or_equal', 'less_than', 'less_than_or_equal']
+
+function isNumericValue(value) {
+  return value !== '' && value !== null && value !== undefined && Number.isFinite(Number(value))
+}
+
+function isNumericEntity(entity) {
+  return Boolean(entity) && (
+    ['number', 'input_number', 'counter'].includes(entity.domain) ||
+    isNumericValue(entity.state) ||
+    Boolean(entity.attributes?.unit_of_measurement) ||
+    ['measurement', 'total', 'total_increasing'].includes(entity.attributes?.state_class)
+  )
+}
+
+function isNumericConditionTarget(entity, attribute) {
+  if (!attribute || attribute === 'state') return isNumericEntity(entity)
+  return isNumericValue(entity?.attributes?.[attribute])
 }
 
 function getUniqueFlowName(name, flows, currentFlowId = '') {
@@ -851,7 +879,7 @@ function getConditionRules(data) {
       id: rule.id || `condition-${index + 1}`,
       entityId: String(rule.entityId ?? ''),
       attribute: String(rule.attribute || 'state'),
-      operator: ['equals', 'not_equals', 'contains'].includes(rule.operator) ? rule.operator : 'equals',
+      operator: [...COMPARISON_OPERATORS, 'contains'].includes(rule.operator) ? rule.operator : 'equals',
       value: rule.value ?? '',
     }))
 }
@@ -868,6 +896,10 @@ function getStateTriggerRules(data) {
         buttonNumber: data.buttonNumber,
         from: data.from ?? '',
         to: data.to ?? '',
+        operator: data.operator ?? '',
+        value: data.value ?? '',
+        duration: data.duration ?? '',
+        durationUnit: data.durationUnit ?? 'minutes',
       }]
       : []
 
@@ -881,6 +913,10 @@ function getStateTriggerRules(data) {
       buttonNumber: rule.buttonNumber,
       from: rule.from ?? '',
       to: rule.to ?? '',
+      operator: COMPARISON_OPERATORS.includes(rule.operator) ? rule.operator : '',
+      value: rule.value ?? '',
+      duration: rule.duration ?? '',
+      durationUnit: ['seconds', 'minutes', 'hours'].includes(rule.durationUnit) ? rule.durationUnit : 'minutes',
     }))
 }
 
@@ -960,6 +996,8 @@ function validateNodeData(data, entityById = new Map(), services = {}) {
     const rules = getStateTriggerRules(data)
     if (!rules.length || rules.some((rule) => !rule.entityId && !rule.deviceId)) return 'Missing entity'
     if (rules.some((rule) => rule.entityId && !entityExists(rule.entityId))) return 'Entity not found'
+    if (rules.some((rule) => rule.operator && !isNumericValue(rule.value))) return 'Numeric triggers need a comparison value'
+    if (rules.some((rule) => rule.duration !== '' && (!Number.isFinite(Number(rule.duration)) || Number(rule.duration) < 0))) return 'Trigger duration must be a non-negative number'
   }
   if (data.kind === 'event' && data.entityId && !entityExists(data.entityId)) return 'Entity not found'
   if (data.kind === 'time') {
@@ -4989,6 +5027,10 @@ function StateTriggerRulesEditor({ data, entities, updateNodeData }) {
       deviceId: selectedRules[0]?.deviceId ?? '',
       from: selectedRules[0]?.from ?? '',
       to: selectedRules[0]?.to ?? '',
+      operator: selectedRules[0]?.operator ?? '',
+      value: selectedRules[0]?.value ?? '',
+      duration: selectedRules[0]?.duration ?? '',
+      durationUnit: selectedRules[0]?.durationUnit ?? 'minutes',
       label: selectedRules.length === 0 ? getCatalogLabel('state') : selectedRules.length === 1 ? (firstEntity?.friendlyName || selectedRules[0].entityId) : `${selectedRules.length} Triggers`,
     })
   }
@@ -5005,6 +5047,10 @@ function StateTriggerRulesEditor({ data, entities, updateNodeData }) {
       entityId: '',
       from: '',
       to: '',
+      operator: '',
+      value: '',
+      duration: '',
+      durationUnit: 'minutes',
     }))
   }
 
@@ -5015,6 +5061,10 @@ function StateTriggerRulesEditor({ data, entities, updateNodeData }) {
         entityId: '',
         from: '',
         to: '',
+        operator: '',
+        value: '',
+        duration: '',
+        durationUnit: 'minutes',
       }])
       return
     }
@@ -5026,21 +5076,52 @@ function StateTriggerRulesEditor({ data, entities, updateNodeData }) {
       {editableRules.map((rule, index) => {
         const entity = entities.find((item) => item.entity_id === rule.entityId)
         const stateOptions = Array.from(new Set([...(ruleStateOptions[rule.entityId] ?? entity?.valueOptions ?? []), rule.from, rule.to].filter(Boolean)))
+        const numeric = isNumericEntity(entity)
 
         return (
           <div className="condition-rule" key={rule.id ?? `${rule.entityId}-${index}`}>
             <label className="condition-rule-entity">
               Entity (choose from list or search and select from Entities below)
-              <EntityInput entities={entities} onChange={(entityId) => updateRule(index, { entityId, deviceId: '', from: '', to: '' })} placeholder="Select entity" value={isSelectableEntity(entity) ? rule.entityId : ''} />
+              <EntityInput entities={entities} onChange={(entityId) => updateRule(index, { entityId, deviceId: '', from: '', to: '', operator: '', value: '', duration: '', durationUnit: 'minutes' })} placeholder="Select entity" value={isSelectableEntity(entity) ? rule.entityId : ''} />
             </label>
             <SelectedEntityChip
               entity={entity}
               entityId={rule.entityId}
-              onRemove={() => updateRule(index, { entityId: '', deviceId: '', from: '', to: '' })}
+              onRemove={() => updateRule(index, { entityId: '', deviceId: '', from: '', to: '', operator: '', value: '', duration: '', durationUnit: 'minutes' })}
             />
             <div className="trigger-rule-values">
-              <label>From<StateValueSelect entity={entity} onChange={(from) => updateRule(index, { from })} options={stateOptions} placeholder="optional" value={rule.from} /></label>
-              <label>To<StateValueSelect entity={entity} onChange={(to) => updateRule(index, { to })} options={stateOptions} placeholder="optional" value={rule.to} /></label>
+              {numeric ? (
+                <>
+                  <label>
+                    Comparison
+                    <select value={rule.operator || 'equals'} onChange={(event) => updateRule(index, { operator: event.target.value, from: '', to: '' })}>
+                      <option value="equals">Equal to</option>
+                      <option value="not_equals">Not equal to</option>
+                      <option value="greater_than">Greater than</option>
+                      <option value="greater_than_or_equal">Greater than or equal to</option>
+                      <option value="less_than">Less than</option>
+                      <option value="less_than_or_equal">Less than or equal to</option>
+                    </select>
+                  </label>
+                  <label>Value<input type="number" value={rule.value ?? ''} onChange={(event) => updateRule(index, { operator: rule.operator || 'equals', value: event.target.value })} placeholder="Enter number" /></label>
+                  <label className="trigger-duration-field">
+                    For (optional)
+                    <span className="duration-inputs">
+                      <input min="0" step="any" type="number" value={rule.duration ?? ''} onChange={(event) => updateRule(index, { operator: rule.operator || 'equals', duration: event.target.value })} placeholder="Duration" />
+                      <select value={rule.durationUnit ?? 'minutes'} onChange={(event) => updateRule(index, { durationUnit: event.target.value })}>
+                        <option value="seconds">seconds</option>
+                        <option value="minutes">minutes</option>
+                        <option value="hours">hours</option>
+                      </select>
+                    </span>
+                  </label>
+                </>
+              ) : (
+                <>
+                  <label>From<StateValueSelect entity={entity} onChange={(from) => updateRule(index, { from, operator: '', value: '' })} options={stateOptions} placeholder="optional" value={rule.from} /></label>
+                  <label>To<StateValueSelect entity={entity} onChange={(to) => updateRule(index, { to, operator: '', value: '' })} options={stateOptions} placeholder="optional" value={rule.to} /></label>
+                </>
+              )}
               {editableRules.length > 1 && (
                 <button className="condition-rule-remove icon-only" onClick={() => removeRule(index)} title="Remove trigger" type="button">
                   <X size={16} />
@@ -5106,9 +5187,13 @@ function ConditionRulesEditor({ data, entities, updateNodeData }) {
       const nextRule = { ...rule, ...patch }
       if ('entityId' in patch) {
         nextRule.attribute = 'state'
+        nextRule.operator = 'equals'
         nextRule.value = ''
       }
-      if ('attribute' in patch) nextRule.value = ''
+      if ('attribute' in patch) {
+        nextRule.operator = 'equals'
+        nextRule.value = ''
+      }
       return nextRule
     }))
   }
@@ -5153,6 +5238,7 @@ function ConditionRulesEditor({ data, entities, updateNodeData }) {
         const selectedAttribute = entityAttributes.find((attribute) => attribute.key === rule.attribute)
         const stateOptions = ruleStateOptions[rule.entityId] ?? entity?.valueOptions ?? []
         const valueOptions = getAttributeValueOptions(selectedAttribute, stateOptions, entity, rule.value)
+        const numeric = isNumericConditionTarget(entity, rule.attribute)
 
         return (
           <div className="condition-rule" key={rule.id ?? `${rule.entityId}-${index}`}>
@@ -5183,12 +5269,21 @@ function ConditionRulesEditor({ data, entities, updateNodeData }) {
                 <select value={rule.operator ?? 'equals'} onChange={(event) => updateRule(index, { operator: event.target.value })}>
                   <option value="equals">equals</option>
                   <option value="not_equals">not equals</option>
-                  <option value="contains">contains</option>
+                  {numeric ? (
+                    <>
+                      <option value="greater_than">greater than</option>
+                      <option value="greater_than_or_equal">greater than or equal to</option>
+                      <option value="less_than">less than</option>
+                      <option value="less_than_or_equal">less than or equal to</option>
+                    </>
+                  ) : <option value="contains">contains</option>}
                 </select>
               </label>
               <label>
                 Value
-                <ValueSelect entity={(rule.attribute ?? 'state') === 'state' ? entity : undefined} onChange={(value) => updateRule(index, { value })} options={valueOptions} placeholder="Select value" value={rule.value} />
+                {numeric
+                  ? <input type="number" value={rule.value ?? ''} onChange={(event) => updateRule(index, { value: event.target.value })} placeholder="Enter number" />
+                  : <ValueSelect entity={(rule.attribute ?? 'state') === 'state' ? entity : undefined} onChange={(value) => updateRule(index, { value })} options={valueOptions} placeholder="Select value" value={rule.value} />}
               </label>
             </div>
           </div>
