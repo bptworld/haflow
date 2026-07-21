@@ -1432,6 +1432,10 @@ textarea:focus {
   grid-column: 1 / -1;
 }
 
+.condition-rule-grid.condition-numeric-grid label:last-child {
+  grid-column: auto;
+}
+
 .trigger-rule-values {
   display: grid;
   grid-template-columns: minmax(112px, 1fr) minmax(112px, 1fr) 38px;

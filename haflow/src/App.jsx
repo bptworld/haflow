@@ -4483,6 +4483,25 @@ function StateValueSelect({ entity, options, placeholder, value, onChange }) {
   )
 }
 
+function NumericComparisonFields({ onOperatorChange, onValueChange, operator, value }) {
+  return (
+    <>
+      <label>
+        Comparison
+        <select value={operator || 'equals'} onChange={(event) => onOperatorChange(event.target.value)}>
+          <option value="equals">Equal to</option>
+          <option value="not_equals">Not equal to</option>
+          <option value="greater_than">Greater than</option>
+          <option value="greater_than_or_equal">Greater than or equal to</option>
+          <option value="less_than">Less than</option>
+          <option value="less_than_or_equal">Less than or equal to</option>
+        </select>
+      </label>
+      <label>Value<input type="number" value={value ?? ''} onChange={(event) => onValueChange(event.target.value)} placeholder="Enter number" /></label>
+    </>
+  )
+}
+
 function EntitySuggestionSelect({ entities, suggestions = [], onSelect }) {
   const options = suggestions
     .map((suggestion) => {
@@ -5092,18 +5111,12 @@ function StateTriggerRulesEditor({ data, entities, updateNodeData }) {
             <div className="trigger-rule-values">
               {numeric ? (
                 <>
-                  <label>
-                    Comparison
-                    <select value={rule.operator || 'equals'} onChange={(event) => updateRule(index, { operator: event.target.value, from: '', to: '' })}>
-                      <option value="equals">Equal to</option>
-                      <option value="not_equals">Not equal to</option>
-                      <option value="greater_than">Greater than</option>
-                      <option value="greater_than_or_equal">Greater than or equal to</option>
-                      <option value="less_than">Less than</option>
-                      <option value="less_than_or_equal">Less than or equal to</option>
-                    </select>
-                  </label>
-                  <label>Value<input type="number" value={rule.value ?? ''} onChange={(event) => updateRule(index, { operator: rule.operator || 'equals', value: event.target.value })} placeholder="Enter number" /></label>
+                  <NumericComparisonFields
+                    onOperatorChange={(operator) => updateRule(index, { operator, from: '', to: '' })}
+                    onValueChange={(value) => updateRule(index, { operator: rule.operator || 'equals', value })}
+                    operator={rule.operator}
+                    value={rule.value}
+                  />
                   <label className="trigger-duration-field">
                     For (optional)
                     <span className="duration-inputs">
@@ -5239,6 +5252,7 @@ function ConditionRulesEditor({ data, entities, updateNodeData }) {
         const stateOptions = ruleStateOptions[rule.entityId] ?? entity?.valueOptions ?? []
         const valueOptions = getAttributeValueOptions(selectedAttribute, stateOptions, entity, rule.value)
         const numeric = isNumericConditionTarget(entity, rule.attribute)
+        const numericState = numeric && (rule.attribute ?? 'state') === 'state'
 
         return (
           <div className="condition-rule" key={rule.id ?? `${rule.entityId}-${index}`}>
@@ -5257,32 +5271,43 @@ function ConditionRulesEditor({ data, entities, updateNodeData }) {
               entityId={rule.entityId}
               onRemove={() => updateRule(index, { entityId: '', attribute: 'state', value: '' })}
             />
-            <div className="condition-rule-grid">
-              <label>
-                Attribute
-                <select value={rule.attribute ?? 'state'} onChange={(event) => updateRule(index, { attribute: event.target.value })}>
-                  {attributes.map((attribute) => <option key={attribute} value={attribute}>{formatAttributeName(attribute)}</option>)}
-                </select>
-              </label>
-              <label>
-                Operator
-                <select value={rule.operator ?? 'equals'} onChange={(event) => updateRule(index, { operator: event.target.value })}>
-                  <option value="equals">equals</option>
-                  <option value="not_equals">not equals</option>
-                  <option value="greater_than">greater than</option>
-                  <option value="greater_than_or_equal">greater than or equal to</option>
-                  <option value="less_than">less than</option>
-                  <option value="less_than_or_equal">less than or equal to</option>
-                  <option value="contains">contains</option>
-                </select>
-              </label>
-              <label>
-                Value
-                {numeric
-                  ? <input type="number" value={rule.value ?? ''} onChange={(event) => updateRule(index, { value: event.target.value })} placeholder="Enter number" />
-                  : <ValueSelect entity={(rule.attribute ?? 'state') === 'state' ? entity : undefined} onChange={(value) => updateRule(index, { value })} options={valueOptions} placeholder="Select value" value={rule.value} />}
-              </label>
-            </div>
+            {numericState ? (
+              <div className="condition-rule-grid condition-numeric-grid">
+                <NumericComparisonFields
+                  onOperatorChange={(operator) => updateRule(index, { operator })}
+                  onValueChange={(value) => updateRule(index, { value })}
+                  operator={rule.operator}
+                  value={rule.value}
+                />
+              </div>
+            ) : (
+              <div className="condition-rule-grid">
+                <label>
+                  Attribute
+                  <select value={rule.attribute ?? 'state'} onChange={(event) => updateRule(index, { attribute: event.target.value })}>
+                    {attributes.map((attribute) => <option key={attribute} value={attribute}>{formatAttributeName(attribute)}</option>)}
+                  </select>
+                </label>
+                <label>
+                  Operator
+                  <select value={rule.operator ?? 'equals'} onChange={(event) => updateRule(index, { operator: event.target.value })}>
+                    <option value="equals">equals</option>
+                    <option value="not_equals">not equals</option>
+                    <option value="greater_than">greater than</option>
+                    <option value="greater_than_or_equal">greater than or equal to</option>
+                    <option value="less_than">less than</option>
+                    <option value="less_than_or_equal">less than or equal to</option>
+                    <option value="contains">contains</option>
+                  </select>
+                </label>
+                <label>
+                  Value
+                  {numeric
+                    ? <input type="number" value={rule.value ?? ''} onChange={(event) => updateRule(index, { value: event.target.value })} placeholder="Enter number" />
+                    : <ValueSelect entity={(rule.attribute ?? 'state') === 'state' ? entity : undefined} onChange={(value) => updateRule(index, { value })} options={valueOptions} placeholder="Select value" value={rule.value} />}
+                </label>
+              </div>
+            )}
           </div>
         )
       })}

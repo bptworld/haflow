@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.63
+
+- Make numeric Condition nodes use the same Comparison and Value controls as numeric Trigger nodes while keeping duration specific to triggers.
+
 ## 0.1.62
 
 - Always offer equal, not-equal, greater-than, and less-than operators in Condition nodes instead of depending on entity numeric-type detection.
