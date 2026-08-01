@@ -37,6 +37,7 @@
         "from": "",
         "to": "",
         "buttonNumber": 1,
+        "triggerPlatform": "lutron_caseta_pico",
         "deviceId": "",
         "triggers": [
           {
@@ -45,6 +46,7 @@
             "deviceId": "",
             "deviceIdentifiers": [],
             "buttonNumber": 1,
+            "triggerPlatform": "lutron_caseta_pico",
             "from": "",
             "to": ""
           }
@@ -94,6 +96,7 @@
         "from": "",
         "to": "",
         "buttonNumber": 2,
+        "triggerPlatform": "lutron_caseta_pico",
         "deviceId": "",
         "triggers": [
           {
@@ -102,6 +105,7 @@
             "deviceId": "",
             "deviceIdentifiers": [],
             "buttonNumber": 2,
+            "triggerPlatform": "lutron_caseta_pico",
             "from": "",
             "to": ""
           }
@@ -151,6 +155,7 @@
         "from": "",
         "to": "",
         "buttonNumber": 5,
+        "triggerPlatform": "lutron_caseta_pico",
         "deviceId": "",
         "triggers": [
           {
@@ -159,6 +164,7 @@
             "deviceId": "",
             "deviceIdentifiers": [],
             "buttonNumber": 5,
+            "triggerPlatform": "lutron_caseta_pico",
             "from": "",
             "to": ""
           }
@@ -180,7 +186,7 @@
       },
       "data": {
         "kind": "service",
-        "label": "Button 3 Action",
+        "label": "Button 5 Action",
         "domain": "",
         "service": "",
         "entityIds": [],
@@ -208,6 +214,7 @@
         "from": "",
         "to": "",
         "buttonNumber": 3,
+        "triggerPlatform": "lutron_caseta_pico",
         "deviceId": "",
         "triggers": [
           {
@@ -216,6 +223,7 @@
             "deviceId": "",
             "deviceIdentifiers": [],
             "buttonNumber": 3,
+            "triggerPlatform": "lutron_caseta_pico",
             "from": "",
             "to": ""
           }
@@ -237,7 +245,7 @@
       },
       "data": {
         "kind": "service",
-        "label": "Button 4 Action",
+        "label": "Button 3 Action",
         "domain": "",
         "service": "",
         "entityIds": [],
@@ -265,6 +273,7 @@
         "from": "",
         "to": "",
         "buttonNumber": 4,
+        "triggerPlatform": "lutron_caseta_pico",
         "deviceId": "",
         "triggers": [
           {
@@ -273,6 +282,7 @@
             "deviceId": "",
             "deviceIdentifiers": [],
             "buttonNumber": 4,
+            "triggerPlatform": "lutron_caseta_pico",
             "from": "",
             "to": ""
           }
@@ -294,7 +304,7 @@
       },
       "data": {
         "kind": "service",
-        "label": "Button 5 Action",
+        "label": "Button 4 Action",
         "domain": "",
         "service": "",
         "entityIds": [],

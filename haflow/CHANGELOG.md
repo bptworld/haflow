@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.64
+
+- Rebuild 5-button Lutron Pico controllers around explicit `lutron_caseta_button_event` presses matched by remote serial and button number.
+- Preserve each Pico button's configured identity independently of canvas position and migrate existing saved Pico triggers automatically.
+- Correct the center, down, and bottom action labels in the 5-button starter controller.
+
 ## 0.1.63
 
 - Make numeric Condition nodes use the same Comparison and Value controls as numeric Trigger nodes while keeping duration specific to triggers.

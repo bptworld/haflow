@@ -4,6 +4,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import express from 'express'
 import WebSocket, { WebSocketServer } from 'ws'
+import { getIdentifierValues, isLutronPicoTrigger, LUTRON_PICO_PLATFORM, matchesLutronPicoPress } from './pico-trigger.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const dataDir = process.env.HAFLOW_DATA_DIR || path.join(__dirname, '..', 'data')
@@ -43,7 +44,6 @@ let notificationActionWaiters = []
 let deviceRegistryById = new Map()
 let entityRegistryDeviceByEntityId = new Map()
 const ANY_CHANGE = '__changed__'
-const LUTRON_5_BUTTON_PICO_BUTTONS = [1, 2, 5, 3, 4]
 const SCHEDULE_TIME_TYPES = new Set(['time', 'sunrise', 'sunset'])
 const COMPARISON_OPERATORS = new Set(['equals', 'not_equals', 'greater_than', 'greater_than_or_equal', 'less_than', 'less_than_or_equal'])
 
@@ -1230,10 +1230,11 @@ function findMatchingTriggerNodes(flow, event) {
       ...rule,
       label: data.label,
       deviceIdentifiers: rule.deviceIdentifiers ?? data.deviceIdentifiers,
-      buttonNumber: rule.buttonNumber ?? data.buttonNumber ?? inferGroupedButtonNumber(node, flow),
+      buttonNumber: rule.buttonNumber ?? data.buttonNumber,
+      triggerPlatform: rule.triggerPlatform ?? data.triggerPlatform,
     }))
     if (event.event_type !== 'state_changed') return rules.some((rule) => deviceTriggerMatches(rule, event))
-    return rules.some((rule) => (stateTriggerMatches(rule, event.data ?? {}, true) && !getTriggerDurationMs(rule)) || deviceTriggerMatches(rule, event))
+    return rules.some((rule) => !isLutronPicoTrigger(rule) && stateTriggerMatches(rule, event.data ?? {}, true) && !getTriggerDurationMs(rule))
   })
 }
 
@@ -1946,21 +1947,9 @@ function getEntityDeviceId(entityId) {
 }
 
 function deviceTriggerMatches(rule, event) {
-  if (!rule.deviceId) return false
-  const data = event.data ?? {}
-  const eventDeviceId = data.device_id || data.deviceId || data.device?.id || data.device
-  const serials = getRuleSerials(rule)
-  const eventSerial = data.serial || data.device_serial || data.serial_number || data.id
-  const matchedDevice = eventDeviceId === rule.deviceId || (eventSerial && serials.includes(String(eventSerial)))
-  if (!matchedDevice) return false
-  if (data.action && data.action !== 'press') return false
-  const buttonNumber = rule.buttonNumber ?? getButtonNumberFromLabel(rule.label)
-  if (buttonNumber !== undefined && buttonNumber !== null && buttonNumber !== '') {
-    const eventButton = data.button_number ?? data.buttonNumber ?? data.button_id ?? data.button
-    if (String(eventButton) !== String(buttonNumber)) return false
-  }
   if (hasStateFilter(rule.from) || hasStateFilter(rule.to)) return false
-  return true
+  const registryIdentifiers = rule.deviceId ? (deviceRegistryById.get(rule.deviceId)?.identifiers ?? []) : []
+  return matchesLutronPicoPress(rule, event, registryIdentifiers)
 }
 
 function logDeviceEventIfRelevant(event) {
@@ -2050,29 +2039,7 @@ function getDeviceEntityIds(deviceId) {
 
 function getRuleSerials(rule) {
   const registryIdentifiers = rule.deviceId ? (deviceRegistryById.get(rule.deviceId)?.identifiers ?? []) : []
-  return [...(rule.deviceIdentifiers ?? []), ...registryIdentifiers]
-    .flatMap((identifier) => Array.isArray(identifier) ? identifier.slice(1) : [identifier])
-    .map((value) => String(value))
-}
-
-function getButtonNumberFromLabel(label) {
-  const match = String(label || '').match(/\bbutton\s+(\d+)\b/i)
-  return match ? Number(match[1]) : undefined
-}
-
-function inferGroupedButtonNumber(node, flow = cachedFlow) {
-  if (!node?.parentId || node.data?.kind !== 'state') return getButtonNumberFromLabel(node?.data?.label)
-  const deviceId = node.data.deviceId || getStateTriggerRules(node.data)[0]?.deviceId
-  if (!deviceId) return getButtonNumberFromLabel(node.data?.label)
-  const siblings = (flow.nodes ?? [])
-    .filter((item) => {
-      if (item.parentId !== node.parentId || item.data?.kind !== 'state') return false
-      const siblingDeviceId = item.data.deviceId || getStateTriggerRules(item.data)[0]?.deviceId
-      return siblingDeviceId === deviceId
-    })
-    .sort((first, second) => (first.position?.y ?? 0) - (second.position?.y ?? 0))
-  const index = siblings.findIndex((item) => item.id === node.id)
-  return index >= 0 ? (LUTRON_5_BUTTON_PICO_BUTTONS[index] ?? index + 1) : getButtonNumberFromLabel(node.data?.label)
+  return getIdentifierValues([...(rule.deviceIdentifiers ?? []), ...registryIdentifiers])
 }
 
 function formatComparableValue(value) {
@@ -3207,6 +3174,7 @@ function normalizeStateTriggerRules(data, nodeId) {
         deviceId: data.deviceId ?? '',
         deviceIdentifiers: data.deviceIdentifiers ?? [],
         buttonNumber: data.buttonNumber,
+        triggerPlatform: data.triggerPlatform,
         from: data.from ?? '',
         to: data.to ?? '',
         operator: data.operator ?? '',
@@ -3224,6 +3192,7 @@ function normalizeStateTriggerRules(data, nodeId) {
       deviceId: String(rule.deviceId ?? ''),
       deviceIdentifiers: Array.isArray(rule.deviceIdentifiers) ? rule.deviceIdentifiers : [],
       buttonNumber: rule.buttonNumber,
+      triggerPlatform: rule.triggerPlatform ?? (isLutronPicoTrigger(rule) ? LUTRON_PICO_PLATFORM : ''),
       from: rule.from ?? '',
       to: rule.to ?? '',
       operator: COMPARISON_OPERATORS.has(rule.operator) ? rule.operator : '',

@@ -228,6 +228,7 @@ const LUTRON_5_BUTTON_PICO_ROWS = [
   { label: 'Button 3 Down', number: 3 },
   { label: 'Button 4 Bottom', number: 4 },
 ]
+const LUTRON_PICO_PLATFORM = 'lutron_caseta_pico'
 
 const nodeCatalog = [
   {
@@ -894,6 +895,7 @@ function getStateTriggerRules(data) {
         deviceId: data.deviceId ?? '',
         deviceIdentifiers: data.deviceIdentifiers ?? [],
         buttonNumber: data.buttonNumber,
+        triggerPlatform: data.triggerPlatform,
         from: data.from ?? '',
         to: data.to ?? '',
         operator: data.operator ?? '',
@@ -911,6 +913,7 @@ function getStateTriggerRules(data) {
       deviceId: String(rule.deviceId ?? ''),
       deviceIdentifiers: Array.isArray(rule.deviceIdentifiers) ? rule.deviceIdentifiers : [],
       buttonNumber: rule.buttonNumber,
+      triggerPlatform: rule.triggerPlatform ?? '',
       from: rule.from ?? '',
       to: rule.to ?? '',
       operator: COMPARISON_OPERATORS.includes(rule.operator) ? rule.operator : '',
@@ -2589,19 +2592,21 @@ function buildDeviceTriggerData(data, device, buttonNumberOverride) {
   return {
     triggers: [{
       ...baseRule,
-      entityId: device.entity_id,
+      entityId: '',
       deviceId: device.deviceId,
       deviceName: device.friendlyName || '',
       deviceIdentifiers: device.attributes?.identifiers ?? [],
       buttonNumber,
+      triggerPlatform: LUTRON_PICO_PLATFORM,
       from: '',
       to: '',
     }],
-    entityId: device.entity_id,
+    entityId: '',
     deviceId: device.deviceId,
     deviceName: device.friendlyName || '',
     deviceIdentifiers: device.attributes?.identifiers ?? [],
     buttonNumber,
+    triggerPlatform: LUTRON_PICO_PLATFORM,
     from: '',
     to: '',
     label: picoRow?.label ?? (buttonNumber ? `Button ${buttonNumber} Pressed` : keepLabel ? data.label : (device.friendlyName || data.label || getCatalogLabel('state'))),
@@ -3088,7 +3093,10 @@ function FlowWorkspace() {
               .filter((node) => node.parentId === selectedNode.parentId && node.data?.kind === 'state')
               .sort((first, second) => first.position.y - second.position.y)
             : []
-          const siblingButtonNumberById = new Map(siblingButtons.map((node, index) => [node.id, LUTRON_5_BUTTON_PICO_ROWS[index]?.number ?? index + 1]))
+          const siblingButtonNumberById = new Map(siblingButtons.map((node, index) => [
+            node.id,
+            node.data?.buttonNumber ?? getStateTriggerRules(node.data)[0]?.buttonNumber ?? LUTRON_5_BUTTON_PICO_ROWS[index]?.number ?? index + 1,
+          ]))
           return current.map((node) => {
           const shouldFillSelected = node.id === selectedNode.id
           const shouldFillSiblingButton = selectedNode.parentId &&
