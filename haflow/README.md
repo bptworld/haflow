@@ -13,6 +13,14 @@
 
 A Home Assistant app for HAFlow, a flow-based automation editor and runner.
 
+## Move your flows to the new HAFlow
+
+**Your saved flows can be transferred.** Follow the [complete transfer instructions](TRANSFER_FLOWS.md) before changing installations.
+
+In the old app, save your edits and choose **Library → Export Backup**. In the new HAFlow (0.1.67 or later), choose **Library → Import old HAFlow** and select that JSON file. Imported flows are separate paused copies. Stop the old app before starting the replacement; review the imports before resuming them. Keep the old app and export until you have verified the new installation.
+
+New installations belong in [PixoraHQforHA](https://github.com/bptworld/PixoraHQforHA/tree/main/haflow). The old code below remains available for existing installs.
+
 ## Installation
 
 To install this app, follow these steps:
