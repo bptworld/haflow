@@ -21,12 +21,12 @@ Use this guide when moving from **bptworld/haflow** to **bptworld/PixoraHQforHA*
    https://github.com/bptworld/PixoraHQforHA
    ```
 
-3. Refresh the store. Install **HAFlow** from **PixoraHQ for Home Assistant**, version **0.1.67 or later**. Check the repository link on the app information page if you see two HAFlow entries.
+3. Refresh the store. Install **HAFlow** from **PixoraHQ for Home Assistant**, version **0.1.68 or later**. Check the repository link on the app information page if you see two HAFlow entries.
 4. Start the new app and open its web interface. Its library may initially show only a Default Flow; that is normal.
 
 ## 3. Import into the new app
 
-1. Expand **Library** in the new app's left sidebar.
+1. Find the bold transfer notice near the top of the new app's left sidebar.
 2. Click **Import old HAFlow**, then **Choose backup or Flow file**.
 3. Select the JSON file you downloaded in step 1. Wait for the imported-flow count to appear in the import window.
 4. Close the window and use the flow selector to open the imported flows. If you had unsaved edits on the current canvas, they stay there; select an imported flow after saving those edits.
@@ -43,7 +43,7 @@ All imported flows start **paused**, even if they were running in the old app. E
 
 ## If something does not look right
 
-- **Import old HAFlow is missing:** check that you opened the app from PixoraHQforHA and updated it to 0.1.67 or later; expand the Library section.
+- **Import old HAFlow is missing:** check that you opened the app from PixoraHQforHA and updated it to 0.1.68 or later; look for the bold transfer notice near the top of the sidebar.
 - **File rejected:** choose the `.json` file from HAFlow's Export Backup or Export Flow, not an HA `.tar` backup or a flow-library index file. Files must be smaller than 9 MB. An invalid flow is rejected before any flows from that file are added. Export individual flows if the full backup is too large.
 - **Imported but nothing runs:** imported flows are intentionally paused. Review them and use Resume after stopping the old app.
 - **Import request interrupted:** check the new flow list before importing again. The request may have completed; repeating it creates additional copies.

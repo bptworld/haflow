@@ -1,7 +1,7 @@
 name: "HAFlow"
-version: "0.1.64"
+version: "0.1.65"
 slug: "haflow"
-description: "A flow editor and runner for Home Assistant automations."
+description: "LEGACY HAFlow: transfer your flows to PixoraHQforHA. Open the app for transfer steps and Export Backup."
 url: "https://github.com/bptworld/haflow"
 arch:
   - aarch64

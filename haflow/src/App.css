@@ -2685,3 +2685,12 @@ textarea:focus {
 .theme-dark .react-flow__controls-button svg {
   fill: currentColor;
 }
+
+.transfer-notice { margin: 12px 0; padding: 12px; border: 2px solid #64748b; border-radius: 8px; font-size: 13px; line-height: 1.5; }
+.transfer-notice > strong { display: block; font-weight: 800; }
+.transfer-notice p { margin: 8px 0; }
+.transfer-notice summary { cursor: pointer; font-weight: 700; margin-top: 8px; }
+.transfer-notice ol { padding-left: 20px; }
+.transfer-notice li { margin-bottom: 10px; }
+.transfer-notice code { overflow-wrap: anywhere; }
+.transfer-notice button { width: 100%; margin-top: 8px; min-height: 36px; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 8px; border: 1px solid #94a3b8; border-radius: 6px; background: transparent; color: inherit; font: inherit; font-weight: 700; cursor: pointer; }

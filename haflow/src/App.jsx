@@ -3881,6 +3881,21 @@ function FlowWorkspace() {
             <span>Ver. {APP_VERSION}</span>
           </div>
         </div>
+        <section className="transfer-notice" aria-label="HAFlow transfer instructions">
+          <strong>HAFlow has moved. Transfer your flows to the new app.</strong>
+          <details><summary>How to transfer your flows</summary>
+            <ol>
+              <li>Save any changes, then use <strong>Export Backup</strong> below to download all saved flows.</li>
+              <li>In Home Assistant, open <strong>Settings → Apps → this old HAFlow</strong>. Turn off <strong>Start on boot</strong> and <strong>Watchdog</strong>, then <strong>Stop</strong>. Keep it installed.</li>
+              <li>Open <strong>App store → ⋮ → Repositories</strong> and add <code>https://github.com/bptworld/PixoraHQforHA</code>.</li>
+              <li>Install <strong>HAFlow from PixoraHQ for Home Assistant</strong> (0.1.68 or later), start it and open its interface.</li>
+              <li>Click <strong>Import old HAFlow</strong> in the new app and select your downloaded JSON backup.</li>
+              <li>Review your imported flows and devices, then <strong>Resume</strong> the flows you want. They start paused. Keep this old app stopped to prevent duplicate automations.</li>
+            </ol>
+            <p>Existing flows are preserved. Settings, logs and running timers are not transferred. Keep your backup and old installation until everything works. To go back, stop the new app before restarting this one.</p>
+            <button type="button" onClick={exportBackup}><Download size={16}/>Export Backup for transfer</button>
+          </details>
+        </section>
         <div className="section-title">Flows</div>
         <div className="flow-library">
           <div className="flow-select-menu" onBlur={(event) => {
