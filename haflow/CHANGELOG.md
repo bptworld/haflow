@@ -1,3 +1,8 @@
+# 0.1.66
+
+- Rename this legacy app to **HAFlow - Old** so it is easy to distinguish from the current PixoraHQforHA app.
+- Keep the existing app slug, configuration and saved data unchanged.
+
 # Changelog
 
 ## 0.1.65

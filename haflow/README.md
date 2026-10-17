@@ -1,3 +1,5 @@
+**This legacy installation is now named HAFlow - Old. The name change preserves its existing app ID, configuration and data.**
+
 > [!WARNING]
 > **DEPRECATED — Home Assistant app moved to PixoraHQforHA.**
 >

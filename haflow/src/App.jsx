@@ -3877,7 +3877,7 @@ function FlowWorkspace() {
         <div className="brand">
           <Cable size={24} />
           <div>
-            <h1>HAFlow</h1>
+            <h1>HAFlow - Old</h1>
             <span>Ver. {APP_VERSION}</span>
           </div>
         </div>
@@ -5896,7 +5896,7 @@ class AppErrorBoundary extends Component {
     return (
       <main className="app-error">
         <div>
-          <h1>HAFlow</h1>
+          <h1>HAFlow - Old</h1>
           <p>The flow editor hit an error while rendering this view.</p>
           <pre>{this.state.error.message}</pre>
           <button onClick={() => window.location.reload()} type="button">Reload</button>

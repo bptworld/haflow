@@ -1,5 +1,5 @@
-name: "HAFlow"
-version: "0.1.65"
+name: "HAFlow - Old"
+version: "0.1.66"
 slug: "haflow"
 description: "LEGACY HAFlow: transfer your flows to PixoraHQforHA. Open the app for transfer steps and Export Backup."
 url: "https://github.com/bptworld/haflow"
@@ -22,3 +22,5 @@ panel_icon: "mdi:cable-data"
 homeassistant_api: true
 options: {}
 schema: {}
+
+panel_title: "HAFlow - Old"
