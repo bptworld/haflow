@@ -1,3 +1,14 @@
+> [!WARNING]
+> **DEPRECATED — Home Assistant app moved to PixoraHQforHA.**
+>
+> Use **[PixoraHQforHA](https://github.com/bptworld/PixoraHQforHA)** for new installations and future HA app releases.
+> This app's new directory is **[haflow](https://github.com/bptworld/PixoraHQforHA/tree/main/haflow)**.
+>
+> Existing installs keep working: this directory and its code have been retained.
+> No automatic migration occurs. Back up settings/data and stop the old app before
+> starting a replacement from the new repository. Keep the old install until the
+> replacement is verified. Other platform components in this repository are unaffected.
+
 # HAFlow
 
 A Home Assistant app for HAFlow, a flow-based automation editor and runner.
