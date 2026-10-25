@@ -1,9 +1,0 @@
-node_modules
-dist
-data
-logs
-*.log
-npm-debug.log*
-.git
-.idea
-.vscode

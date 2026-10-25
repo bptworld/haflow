@@ -1,20 +1,15 @@
-**This legacy installation is now named HAFlow - Old. The name change preserves its existing app ID, configuration and data.**
+# HAFlow has moved
 
-# HAFlow setup and Flow transfer
+**The old Home Assistant app has been retired and its executable app code removed.**
 
-**HAFlow has moved — transfer your saved flows to PixoraHQforHA.**
+Install and update HAFlow from **[PixoraHQforHA](https://github.com/bptworld/PixoraHQforHA)**.
 
-1. Open the **old HAFlow** app, save changes, expand **Library**, and choose **Export Backup**. Keep the downloaded JSON file.
-2. In **Settings → Apps → the old HAFlow**, turn off **Start on boot** and **Watchdog**, then **Stop** it. Keep it installed until the transfer is verified.
-3. Add `https://github.com/bptworld/PixoraHQforHA` under **App store → ⋮ → Repositories**. Install **HAFlow from PixoraHQ for Home Assistant**, version **0.1.68 or later**, then start and open it.
-4. Click the bold transfer notice's **Import old HAFlow** button in the new app. Choose your exported JSON file. Single **Export Flow** files also work.
-5. Close the import window, select each imported flow, and check its devices and connections. **Imported flows start paused; existing flows are preserved.**
-6. With the old app stopped, click **Resume** for the reviewed flows and test their triggers. Enable **Start on boot** and **Watchdog** for the new app after checking it works.
+[Current HAFlow app and documentation](https://github.com/bptworld/PixoraHQforHA/tree/main/haflow)
 
-**Do not run both copies of the same automations.** Keep the old app stopped and retain your export. Settings, logs, history and pending timers do not transfer. Device references are retained; check them if you moved to another Home Assistant. Import the file once: importing again creates additional copies.
+[Current flow transfer instructions](https://github.com/bptworld/PixoraHQforHA/blob/main/haflow/TRANSFER_FLOWS.md)
 
-**Need to go back?** Stop the new app first, then start the old one. The old app's saved flows are unchanged. Never uninstall the old app until you have verified the new one.
+Removing repository files does not migrate or delete an installed app or its data. Back up the old installation before switching. The normal flow export includes saved flows, but does not include app settings, logs, run history or runtime values. Retain a full Home Assistant app backup when those are needed.
 
-For a new installation without old flows, start the app and create a new flow. Home Assistant connects automatically; no access token is required.
+Stop the old app before starting its replacement. Verify the transfer and preserve each flow's intended pause state; do not run both copies of the same automations.
 
 Brought to you by [PixoraHQ.com](https://pixorahq.com/).
